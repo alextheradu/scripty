@@ -7,6 +7,7 @@ import { Toolbar } from './Toolbar'
 import { Autocomplete } from './Autocomplete'
 import { PageBreak } from './PageBreak'
 import { getSocket } from '@/lib/socket'
+import { CollaboratorCursor } from './CollaboratorCursor'
 
 const LINES_PER_PAGE = 55
 
@@ -28,6 +29,9 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
     suggestions: string[]; query: string; position: { top: number; left: number }
   } | null>(null)
   const [lastEnterEmpty, setLastEnterEmpty] = useState<string | null>(null)
+  const [remoteCursors, setRemoteCursors] = useState<
+    Map<string, { lineId: string; offset: number; user: { name: string; color: string } }>
+  >(new Map())
   const lineRefs = useRef<Map<string, EditorLineHandle>>(new Map())
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
   const socket = getSocket()
@@ -179,7 +183,10 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
       if (authorId === userId) return
       setLines(prev => prev.map(l => l.id === lineId ? { ...l, type, text } : l))
     })
-    return () => { socket.off('line:update') }
+    socket.on('cursor:move', ({ lineId, offset, user }: any) => {
+      setRemoteCursors(prev => new Map(prev).set(user.name, { lineId, offset, user }))
+    })
+    return () => { socket.off('line:update'); socket.off('cursor:move') }
   }, [socket, userId])
 
   const changeActiveType = (type: ElementType) => {
@@ -218,6 +225,24 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
                   onClick={id => setActiveId(id)}
                   readOnly={readOnly}
                 />
+                {[...remoteCursors.values()]
+                  .filter(c => c.lineId === line.id)
+                  .map(c => {
+                    const el = document.querySelector(`[data-line-id="${line.id}"]`)
+                    const paperEl = document.querySelector('[data-paper]')
+                    if (!el || !paperEl) return null
+                    const rect = el.getBoundingClientRect()
+                    const paperRect = paperEl.getBoundingClientRect()
+                    return (
+                      <CollaboratorCursor
+                        key={c.user.name}
+                        name={c.user.name}
+                        color={c.user.color}
+                        top={rect.top - paperRect.top}
+                        left={rect.left - paperRect.left + c.offset * 7.2}
+                      />
+                    )
+                  })}
               </div>
             )
           })}
