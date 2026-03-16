@@ -32,10 +32,11 @@ app.prepare().then(() => {
 
   io.on('connection', (socket) => {
     socket.on('script:join', ({ scriptId, user }) => {
-      socket.join(`script:${scriptId}`)
-      socket.data.scriptId = scriptId
       socket.data.user = user
+      socket.data.scriptId = scriptId
+      socket.data.authenticated = !!(user?.id && !String(user.id).startsWith('anon'))
       socket.data.color = COLORS[Math.floor(Math.random() * COLORS.length)]
+      socket.join(`script:${scriptId}`)
       io.to(`script:${scriptId}`).emit('presence:update', getRoomPresence(io, scriptId))
     })
 
@@ -45,6 +46,9 @@ app.prepare().then(() => {
     })
 
     socket.on('line:update', (data) => {
+      // Block anonymous/unauthenticated sockets from broadcasting edits
+      const uid = socket.data.user?.id
+      if (!uid || String(uid).startsWith('anon-') || !socket.data.authenticated) return
       socket.to(`script:${data.scriptId}`).emit('line:update', data)
     })
 

@@ -89,6 +89,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
   }
 
   const updateLine = useCallback((id: string, text: string) => {
+    if (readOnly) return
     onEdit?.()
     setLines(prev => {
       const next = prev.map(l => l.id === id ? { ...l, text } : l)

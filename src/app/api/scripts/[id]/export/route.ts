@@ -22,25 +22,26 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   const lines = JSON.parse(script.content || '[]')
   const title = script.title
+  const safeTitle = title.replace(/["\r\n]/g, '_')
 
   if (format === 'fountain') {
     const content = toFountain(title, lines)
     return new NextResponse(content, {
-      headers: { 'Content-Type': 'text/plain', 'Content-Disposition': `attachment; filename="${title}.fountain"` },
+      headers: { 'Content-Type': 'text/plain', 'Content-Disposition': `attachment; filename="${safeTitle}.fountain"` },
     })
   }
 
   if (format === 'fdx') {
     const content = toFDX(title, lines)
     return new NextResponse(content, {
-      headers: { 'Content-Type': 'application/xml', 'Content-Disposition': `attachment; filename="${title}.fdx"` },
+      headers: { 'Content-Type': 'application/xml', 'Content-Disposition': `attachment; filename="${safeTitle}.fdx"` },
     })
   }
 
   if (format === 'txt') {
     const content = toPlainText(title, lines)
     return new NextResponse(content, {
-      headers: { 'Content-Type': 'text/plain', 'Content-Disposition': `attachment; filename="${title}.txt"` },
+      headers: { 'Content-Type': 'text/plain', 'Content-Disposition': `attachment; filename="${safeTitle}.txt"` },
     })
   }
 
@@ -55,7 +56,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return new NextResponse(pdf, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${title}.pdf"`,
+        'Content-Disposition': `attachment; filename="${safeTitle}.pdf"`,
       },
     })
   } finally {
