@@ -9,6 +9,7 @@ const allowedEmails = (process.env.ALLOWED_EMAILS ?? '')
   .filter(Boolean)
 
 export const authOptions: NextAuthOptions = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   adapter: PrismaAdapter(prisma) as any,
   providers: [
     GoogleProvider({
