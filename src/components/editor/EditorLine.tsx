@@ -10,6 +10,7 @@ interface EditorLineProps {
   onChange: (id: string, text: string) => void
   onKeyDown: (e: React.KeyboardEvent, id: string) => void
   onClick: (id: string) => void
+  readOnly?: boolean
 }
 
 export interface EditorLineHandle {
@@ -18,7 +19,7 @@ export interface EditorLineHandle {
 }
 
 export const EditorLine = forwardRef<EditorLineHandle, EditorLineProps>(
-  ({ line, isActive, onChange, onKeyDown, onClick }, ref) => {
+  ({ line, isActive, onChange, onKeyDown, onClick, readOnly }, ref) => {
     const divRef = useRef<HTMLDivElement>(null)
     const styles = LINE_STYLES[line.type]
 
@@ -80,7 +81,7 @@ export const EditorLine = forwardRef<EditorLineHandle, EditorLineProps>(
     return (
       <div
         ref={divRef}
-        contentEditable
+        contentEditable={readOnly ? false : true}
         suppressContentEditableWarning
         data-line-id={line.id}
         data-element-type={line.type}
@@ -106,6 +107,7 @@ export const EditorLine = forwardRef<EditorLineHandle, EditorLineProps>(
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           position: 'relative',
+          cursor: readOnly ? 'default' : 'text',
         }}
       />
     )

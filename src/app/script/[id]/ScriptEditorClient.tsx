@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Editor } from '@/components/editor/Editor'
 import { Header } from '@/components/shared/Header'
 import type { ScriptLine } from '@/lib/editor/types'
@@ -12,6 +12,11 @@ interface Props {
 export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userId, readOnly }: Props) {
   const [title, setTitle] = useState(initialTitle)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
+  const [streak, setStreak] = useState(0)
+
+  useEffect(() => {
+    fetch('/api/stats').then(r => r.json()).then(d => setStreak(d.currentStreak ?? 0))
+  }, [])
 
   async function handleTitleChange(newTitle: string) {
     setTitle(newTitle)
@@ -34,6 +39,7 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
         scriptId={scriptId}
         title={title}
         saveStatus={saveStatus}
+        streakCount={streak}
         onTitleChange={handleTitleChange}
         onExport={() => {}}
         onShare={() => {}}
@@ -47,6 +53,7 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
             userId={userId}
             readOnly={readOnly}
             onLinesChange={handleLinesChange}
+            onEdit={() => setSaveStatus('unsaved')}
           />
         </main>
       </div>

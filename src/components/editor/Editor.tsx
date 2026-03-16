@@ -16,9 +16,10 @@ interface EditorProps {
   userId: string
   readOnly?: boolean
   onLinesChange?: (lines: ScriptLine[]) => void
+  onEdit?: () => void
 }
 
-export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange }: EditorProps) {
+export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange, onEdit }: EditorProps) {
   const [lines, setLines] = useState<ScriptLine[]>(
     initialLines.length ? initialLines : [{ id: crypto.randomUUID(), type: 'ACTION', text: '' }]
   )
@@ -84,6 +85,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
   }
 
   const updateLine = useCallback((id: string, text: string) => {
+    onEdit?.()
     setLines(prev => {
       const next = prev.map(l => l.id === id ? { ...l, text } : l)
       const line = next.find(l => l.id === id)
@@ -95,7 +97,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
     })
     scheduleSave()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scriptId, userId, scheduleSave, socket])
+  }, [scriptId, userId, scheduleSave, socket, onEdit])
 
   function handleKeyDown(e: React.KeyboardEvent, id: string) {
     const line = lines.find(l => l.id === id)
@@ -214,6 +216,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
                   onChange={readOnly ? () => {} : updateLine}
                   onKeyDown={readOnly ? () => {} : handleKeyDown}
                   onClick={id => setActiveId(id)}
+                  readOnly={readOnly}
                 />
               </div>
             )
