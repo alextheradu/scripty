@@ -20,6 +20,7 @@ export default async function ScriptPage({ params }: { params: { id: string } })
   if (!isOwner && !collab) notFound()
 
   const readOnly = collab?.role === 'viewer'
+  const isAdmin = isOwner || collab?.role === 'admin'
   const lines = JSON.parse(script.content || '[]')
 
   return (
@@ -31,6 +32,8 @@ export default async function ScriptPage({ params }: { params: { id: string } })
       userName={session.user.name ?? 'User'}
       userImage={session.user.image ?? undefined}
       readOnly={readOnly}
+      isAdmin={isAdmin}
+      shareToken={script.shareToken ?? null}
     />
   )
 }
