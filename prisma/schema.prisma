@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String               @id @default(cuid())
+  email        String               @unique
+  name         String
+  image        String?
+  createdAt    DateTime             @default(now())
+  scripts      ScriptCollaborator[]
+  messages     Message[]
+  stats        WritingStats[]
+  ownedScripts Script[]             @relation("owner")
+  revisions    Revision[]           @relation("author")
+  accounts     Account[]
+  sessions     Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+  @@unique([identifier, token])
+}
+
+model Script {
+  id            String               @id @default(cuid())
+  title         String               @default("Untitled Script")
+  content       String               @default("[]")
+  shareToken    String?              @unique
+  publicAccess  Boolean              @default(false)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  ownerId       String
+  owner         User                 @relation("owner", fields: [ownerId], references: [id])
+  collaborators ScriptCollaborator[]
+  revisions     Revision[]
+  messages      Message[]
+  characters    Character[]
+}
+
+model ScriptCollaborator {
+  id       String @id @default(cuid())
+  role     String
+  userId   String
+  scriptId String
+  user     User   @relation(fields: [userId], references: [id])
+  script   Script @relation(fields: [scriptId], references: [id])
+  @@unique([userId, scriptId])
+}
+
+model Revision {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
+  scriptId  String
+  authorId  String
+  script    Script   @relation(fields: [scriptId], references: [id])
+  author    User     @relation("author", fields: [authorId], references: [id])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  text      String
+  createdAt DateTime @default(now())
+  userId    String
+  scriptId  String
+  user      User     @relation(fields: [userId], references: [id])
+  script    Script   @relation(fields: [scriptId], references: [id])
+}
+
+model Character {
+  id       String  @id @default(cuid())
+  name     String
+  notes    String?
+  scriptId String
+  script   Script  @relation(fields: [scriptId], references: [id])
+  @@unique([name, scriptId])
+}
+
+model WritingStats {
+  id     String @id @default(cuid())
+  date   String
+  words  Int    @default(0)
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+  @@unique([userId, date])
+}
