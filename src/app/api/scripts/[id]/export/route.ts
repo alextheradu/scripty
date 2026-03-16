@@ -46,7 +46,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   try {
     const page = await browser.newPage()
     await page.setContent(buildPDFHtml(title, lines), { waitUntil: 'networkidle0' })
-    const pdf = await page.pdf({ format: 'Letter', printBackground: false })
+    const pdfData = await page.pdf({ format: 'Letter', printBackground: false })
+    const pdf = Buffer.from(pdfData)
     return new NextResponse(pdf, {
       headers: {
         'Content-Type': 'application/pdf',

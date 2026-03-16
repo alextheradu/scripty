@@ -5,6 +5,9 @@ import { Header } from '@/components/shared/Header'
 import { LeftSidebar } from '@/components/sidebar/LeftSidebar'
 import { RightSidebar } from '@/components/sidebar/RightSidebar'
 import { ChatPanel } from '@/components/chat/ChatPanel'
+import { PomodoroTimer } from '@/components/pomodoro/PomodoroTimer'
+import { ExportModal } from '@/components/shared/ExportModal'
+import { ShareModal } from '@/components/shared/ShareModal'
 import { getSocket } from '@/lib/socket'
 import type { ScriptLine } from '@/lib/editor/types'
 import { ELEMENT_LABELS } from '@/lib/editor/lineStyles'
@@ -15,16 +18,16 @@ interface Props {
   readOnly?: boolean; isAdmin?: boolean; shareToken?: string | null
 }
 
-export function ScriptEditorClient({
-  scriptId, initialTitle, initialLines, userId, userName, userImage,
-  readOnly, isAdmin,
-}: Props) {
+export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userId, userName, userImage, readOnly, isAdmin, shareToken: initShare }: Props) {
   const [title, setTitle] = useState(initialTitle)
   const [lines, setLines] = useState<ScriptLine[]>(initialLines)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   const [leftOpen, setLeftOpen] = useState(true)
   const [rightOpen, setRightOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
+  const [pomodoroOpen, setPomodoroOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string; image?: string; color: string; socketId?: string }[]>([])
   const [activeType, setActiveType] = useState<ScriptLine['type']>('ACTION')
   const [streak, setStreak] = useState(0)
@@ -32,29 +35,25 @@ export function ScriptEditorClient({
 
   useEffect(() => {
     socket.emit('script:join', { scriptId, user: { id: userId, name: userName, image: userImage } })
-    socket.on('presence:update', (users: { id: string; name: string; image?: string; color: string; socketId?: string }[]) => setOnlineUsers(users.filter(u => u.id !== userId)))
-    fetch('/api/stats').then(r => r.json()).then(d => setStreak(d.currentStreak ?? 0))
+    const handlePresence = (users: { id: string; name: string; image?: string; color: string; socketId?: string }[]) =>
+      setOnlineUsers(users.filter(u => u.id !== userId))
+    socket.on('presence:update', handlePresence)
+    fetch('/api/stats').then(r => r.json()).then(d => setStreak(d.currentStreak ?? 0)).catch(() => {})
     return () => {
       socket.emit('script:leave', { scriptId })
-      socket.off('presence:update')
+      socket.off('presence:update', handlePresence)
     }
   }, [scriptId, userId, userName, userImage, socket])
 
   async function handleTitleChange(t: string) {
     setTitle(t)
-    setSaveStatus('saving')
-    await fetch(`/api/scripts/${scriptId}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: t }),
-    })
-    setSaveStatus('saved')
+    await fetch(`/api/scripts/${scriptId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t }) })
   }
 
   function handleLinesChange(newLines: ScriptLine[]) {
     setLines(newLines)
     setSaveStatus('saved')
-    const last = newLines[newLines.length - 1]
-    if (last) setActiveType(last.type)
+    if (newLines.length > 0) setActiveType(newLines[newLines.length - 1].type)
   }
 
   function handleSceneReorder(from: number, to: number) {
@@ -75,9 +74,9 @@ export function ScriptEditorClient({
         scriptId={scriptId} title={title} saveStatus={saveStatus}
         streakCount={streak}
         onTitleChange={handleTitleChange}
-        onExport={() => {}}
-        onShare={() => {}}
-        onPomodoro={() => {}}
+        onExport={() => setExportOpen(true)}
+        onShare={() => setShareOpen(true)}
+        onPomodoro={() => setPomodoroOpen(o => !o)}
       />
 
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
@@ -112,20 +111,20 @@ export function ScriptEditorClient({
         </button>
       </div>
 
-      <div style={{
-        height: 28, background: '#1a1a1f', borderTop: '1px solid #2a2a30',
-        display: 'flex', alignItems: 'center', padding: '0 1rem',
-        gap: '1.5rem', fontSize: '0.75rem', color: '#6b6a64', fontFamily: 'Syne, sans-serif',
-      }}>
+      <div style={{ height: 28, background: '#1a1a1f', borderTop: '1px solid #2a2a30', display: 'flex', alignItems: 'center', padding: '0 1rem', gap: '1.5rem', fontSize: '0.75rem', color: '#6b6a64', fontFamily: 'Syne, sans-serif' }}>
         <span>{wordCount.toLocaleString()} words</span>
         <span>{pageCount} pages</span>
         <span>{ELEMENT_LABELS[activeType]}</span>
       </div>
 
-      <ChatPanel
-        scriptId={scriptId} open={chatOpen}
-        onToggle={() => setChatOpen(o => !o)}
+      <ChatPanel scriptId={scriptId} open={chatOpen} onToggle={() => setChatOpen(o => !o)} onUnreadChange={() => {}} />
+      <PomodoroTimer
+        open={pomodoroOpen}
+        onClose={() => setPomodoroOpen(false)}
+        onBroadcast={msg => socket.emit('chat:send', { scriptId, text: `⏱ ${msg}` })}
       />
+      <ExportModal scriptId={scriptId} scriptTitle={title} open={exportOpen} onClose={() => setExportOpen(false)} />
+      <ShareModal scriptId={scriptId} shareToken={initShare ?? null} open={shareOpen} onClose={() => setShareOpen(false)} isAdmin={!!isAdmin} />
     </div>
   )
 }
@@ -133,8 +132,7 @@ export function ScriptEditorClient({
 function toggleBtn(side: 'left' | 'right'): React.CSSProperties {
   return {
     width: 18, background: '#1a1a1f',
-    border: 'none',
-    borderRight: side === 'left' ? '1px solid #2a2a30' : 'none',
+    border: 'none', borderRight: side === 'left' ? '1px solid #2a2a30' : 'none',
     borderLeft: side === 'right' ? '1px solid #2a2a30' : 'none',
     color: '#6b6a64', cursor: 'pointer', fontSize: '0.875rem',
     flexShrink: 0, alignSelf: 'stretch',
