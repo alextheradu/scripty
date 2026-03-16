@@ -5,7 +5,7 @@ interface ContributionGraphProps {
 function getLevel(words: number): number {
   if (words === 0) return 0
   if (words <= 200) return 1
-  if (words <= 500) return 2
+  if (words < 500) return 2
   return 3
 }
 

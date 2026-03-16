@@ -14,7 +14,7 @@ export async function GET() {
 
   // Streak calculation
   const sortedDates = stats.map(s => s.date).sort()
-  let streak = 0, longestStreak = 0, currentStreak = 0
+  let longestStreak = 0, currentStreak = 0
   const today = new Date().toISOString().slice(0, 10)
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
 
@@ -25,14 +25,33 @@ export async function GET() {
     const prev = new Date(new Date(check).getTime() - 86400000).toISOString().slice(0, 10)
     check = prev
   }
-  longestStreak = stats.reduce((max, s, i) => {
-    if (s.words > 0) {
-      if (i === 0 || stats[i - 1].words === 0) streak = 1
-      else streak++
-      return Math.max(max, streak)
+  longestStreak = (() => {
+    let max = 0
+    let current = 0
+    let prevDate: string | null = null
+    for (const s of stats) {
+      if (s.words > 0) {
+        if (prevDate) {
+          const prev = new Date(prevDate)
+          const curr = new Date(s.date)
+          const diffDays = Math.round((curr.getTime() - prev.getTime()) / 86400000)
+          if (diffDays === 1) {
+            current++
+          } else {
+            current = 1
+          }
+        } else {
+          current = 1
+        }
+        prevDate = s.date
+        max = Math.max(max, current)
+      } else {
+        prevDate = null
+        current = 0
+      }
     }
     return max
-  }, 0)
+  })()
 
   const scripts = await prisma.script.findMany({
     where: { ownerId: session.user.id },

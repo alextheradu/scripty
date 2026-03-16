@@ -1,8 +1,65 @@
 import type { ScriptLine } from '../editor/types'
 import { LINE_STYLES } from '../editor/lineStyles'
 
+// Helper: estimate lines of text (12pt Courier Prime, ~62 chars per line at screenplay width)
+const CHARS_PER_LINE = 62
+
+function splitDialogueForMoreContd(
+  lines: ScriptLine[]
+): ScriptLine[] {
+  const result: ScriptLine[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    // Look for CHARACTER followed by dialogue block
+    if (line.type === 'CHARACTER') {
+      const charName = line.text.trim().toUpperCase()
+      result.push(line)
+      i++
+      // Collect the dialogue block
+      const block: ScriptLine[] = []
+      while (i < lines.length && (lines[i].type === 'DIALOGUE' || lines[i].type === 'PARENTHETICAL')) {
+        block.push(lines[i])
+        i++
+      }
+      // Estimate total lines in block
+      let totalLines = 0
+      for (const bl of block) {
+        totalLines += Math.ceil(bl.text.length / CHARS_PER_LINE) + 1
+      }
+      // If block is long enough to potentially span a page (> 10 lines), insert MORE/CONT'D
+      if (totalLines > 10) {
+        // Split at midpoint by finding a DIALOGUE line near middle
+        let lineCount = 0
+        let splitAt = -1
+        for (let j = 0; j < block.length; j++) {
+          lineCount += Math.ceil(block[j].text.length / CHARS_PER_LINE) + 1
+          if (lineCount > totalLines / 2 && block[j].type === 'DIALOGUE' && splitAt === -1) {
+            splitAt = j
+          }
+        }
+        if (splitAt > 0 && splitAt < block.length - 1) {
+          for (let j = 0; j <= splitAt; j++) result.push(block[j])
+          result.push({ id: `more-${line.id}`, type: 'PARENTHETICAL', text: '(MORE)' })
+          result.push({ id: `contd-${line.id}`, type: 'CHARACTER', text: `${charName} (CONT'D)` })
+          for (let j = splitAt + 1; j < block.length; j++) result.push(block[j])
+        } else {
+          result.push(...block)
+        }
+      } else {
+        result.push(...block)
+      }
+    } else {
+      result.push(line)
+      i++
+    }
+  }
+  return result
+}
+
 export function buildPDFHtml(title: string, lines: ScriptLine[]): string {
-  const paragraphs = lines.map(l => {
+  const processedLines = splitDialogueForMoreContd(lines)
+  const paragraphs = processedLines.map(l => {
     const s = LINE_STYLES[l.type]
     const styles = [
       s.fontWeight ? `font-weight:${s.fontWeight}` : '',
