@@ -1,16 +1,40 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { Avatar } from '@/components/shared/Avatar'
+import type { ScriptLine } from '@/lib/editor/types'
+
+interface OnlineUser {
+  id: string
+  name: string
+  image?: string
+  color: string
+  socketId?: string
+}
+
+interface Collaborator {
+  id: string
+  role: string
+  user?: { name?: string; image?: string }
+}
+
+interface Revision {
+  id: string
+  content: string
+  createdAt: string
+}
 
 interface RightSidebarProps {
-  scriptId: string; open: boolean; onlineUsers: any[]
-  isAdmin: boolean; onRestore: (content: any[]) => void
+  scriptId: string
+  open: boolean
+  onlineUsers: OnlineUser[]
+  isAdmin: boolean
+  onRestore: (content: ScriptLine[]) => void
 }
 
 export function RightSidebar({ scriptId, open, onlineUsers, isAdmin, onRestore }: RightSidebarProps) {
   const [tab, setTab] = useState<'people' | 'history'>('people')
-  const [collaborators, setCollaborators] = useState<any[]>([])
-  const [revisions, setRevisions] = useState<any[]>([])
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([])
+  const [revisions, setRevisions] = useState<Revision[]>([])
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteError, setInviteError] = useState('')
   const [previewing, setPreviewing] = useState<string | null>(null)
@@ -100,11 +124,11 @@ export function RightSidebar({ scriptId, open, onlineUsers, isAdmin, onRestore }
                   <button onClick={() => setPreviewing(previewing === rev.id ? null : rev.id)} style={smallBtn}>
                     {previewing === rev.id ? 'Close' : 'Preview'}
                   </button>
-                  <button onClick={() => onRestore(JSON.parse(rev.content))} style={{ ...smallBtn, color: '#e8b86d' }}>Restore</button>
+                  <button onClick={() => onRestore(JSON.parse(rev.content) as ScriptLine[])} style={{ ...smallBtn, color: '#e8b86d' }}>Restore</button>
                 </div>
                 {previewing === rev.id && (
                   <div style={{ marginTop: '0.4rem', background: '#0f0f11', borderRadius: 4, padding: '0.4rem', fontSize: '0.625rem', color: '#6b6a64', fontFamily: '"Courier Prime", monospace', maxHeight: 180, overflowY: 'auto' }}>
-                    {JSON.parse(rev.content).slice(0, 20).map((l: any) => <div key={l.id}>{l.text || '—'}</div>)}
+                    {(JSON.parse(rev.content) as ScriptLine[]).slice(0, 20).map(l => <div key={l.id}>{l.text || '—'}</div>)}
                   </div>
                 )}
               </div>

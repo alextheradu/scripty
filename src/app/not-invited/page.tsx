@@ -10,7 +10,7 @@ export default function NotInvited() {
         Scripty
       </h1>
       <p style={{ fontSize: '1.25rem', color: '#6b6a64', marginBottom: '0.5rem' }}>
-        You&apos;re not on the list.
+        You&apos;re not on the invite list.
       </p>
       <p style={{ color: '#6b6a64', fontSize: '0.875rem' }}>
         Ask the owner to add your Google account email to the allowlist.

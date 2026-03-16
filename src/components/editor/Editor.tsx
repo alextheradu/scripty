@@ -183,7 +183,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
       if (authorId === userId) return
       setLines(prev => prev.map(l => l.id === lineId ? { ...l, type, text } : l))
     })
-    socket.on('cursor:move', ({ lineId, offset, user }: any) => {
+    socket.on('cursor:move', ({ lineId, offset, user }: { lineId: string; offset: number; user: { name: string; color: string } }) => {
       setRemoteCursors(prev => new Map(prev).set(user.name, { lineId, offset, user }))
     })
     return () => { socket.off('line:update'); socket.off('cursor:move') }
@@ -225,7 +225,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
                   onClick={id => setActiveId(id)}
                   readOnly={readOnly}
                 />
-                {[...remoteCursors.values()]
+                {Array.from(remoteCursors.values())
                   .filter(c => c.lineId === line.id)
                   .map(c => {
                     const el = document.querySelector(`[data-line-id="${line.id}"]`)

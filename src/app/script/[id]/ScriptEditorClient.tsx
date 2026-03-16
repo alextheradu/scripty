@@ -25,15 +25,14 @@ export function ScriptEditorClient({
   const [leftOpen, setLeftOpen] = useState(true)
   const [rightOpen, setRightOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
-  const [chatUnread, setChatUnread] = useState(0)
-  const [onlineUsers, setOnlineUsers] = useState<any[]>([])
+  const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string; image?: string; color: string; socketId?: string }[]>([])
   const [activeType, setActiveType] = useState<ScriptLine['type']>('ACTION')
   const [streak, setStreak] = useState(0)
   const socket = getSocket()
 
   useEffect(() => {
     socket.emit('script:join', { scriptId, user: { id: userId, name: userName, image: userImage } })
-    socket.on('presence:update', (users: any[]) => setOnlineUsers(users.filter(u => u.id !== userId)))
+    socket.on('presence:update', (users: { id: string; name: string; image?: string; color: string; socketId?: string }[]) => setOnlineUsers(users.filter(u => u.id !== userId)))
     fetch('/api/stats').then(r => r.json()).then(d => setStreak(d.currentStreak ?? 0))
     return () => {
       socket.emit('script:leave', { scriptId })
@@ -126,7 +125,6 @@ export function ScriptEditorClient({
       <ChatPanel
         scriptId={scriptId} open={chatOpen}
         onToggle={() => setChatOpen(o => !o)}
-        onUnreadChange={setChatUnread}
       />
     </div>
   )

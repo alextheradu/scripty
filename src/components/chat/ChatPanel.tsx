@@ -1,8 +1,17 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 import { getSocket } from '@/lib/socket'
 import { ChatMessage } from './ChatMessage'
+
+interface MessageData {
+  id: string
+  text: string
+  userId: string
+  createdAt: string
+  scriptId?: string
+  user?: { name?: string; image?: string }
+}
 
 interface ChatPanelProps {
   scriptId: string
@@ -13,32 +22,34 @@ interface ChatPanelProps {
 
 export function ChatPanel({ scriptId, open, onToggle, onUnreadChange }: ChatPanelProps) {
   const { data: session } = useSession()
-  const [messages, setMessages] = useState<any[]>([])
+  const [messages, setMessages] = useState<MessageData[]>([])
   const [input, setInput] = useState('')
   const [unread, setUnread] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const socket = getSocket()
+  const onUnreadChangeRef = useRef(onUnreadChange)
+  onUnreadChangeRef.current = onUnreadChange
 
   useEffect(() => {
     fetch(`/api/scripts/${scriptId}/messages`).then(r => r.json()).then(d => setMessages(d.messages ?? []))
   }, [scriptId])
 
   useEffect(() => {
-    socket.on('chat:message', (msg: any) => {
+    socket.on('chat:message', (msg: MessageData) => {
       setMessages(prev => [...prev, msg])
       if (!open) {
-        setUnread(u => { const n = u + 1; onUnreadChange?.(n); return n })
+        setUnread(u => { const n = u + 1; onUnreadChangeRef.current?.(n); return n })
       }
     })
     return () => { socket.off('chat:message') }
-  }, [socket, open, onUnreadChange])
+  }, [socket, open])
 
   useEffect(() => {
-    if (open) { setUnread(0); onUnreadChange?.(0) }
+    if (open) { setUnread(0); onUnreadChangeRef.current?.(0) }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [open, messages])
 
-  async function send() {
+  const send = useCallback(async () => {
     const text = input.trim()
     if (!text) return
     setInput('')
@@ -50,7 +61,7 @@ export function ChatPanel({ scriptId, open, onToggle, onUnreadChange }: ChatPane
     // Broadcast to other users via socket (sender already sees it from state)
     socket.emit('chat:send', { ...message, scriptId })
     setMessages(prev => [...prev, message])
-  }
+  }, [input, scriptId, socket])
 
   return (
     <>
