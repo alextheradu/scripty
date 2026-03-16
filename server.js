@@ -27,6 +27,7 @@ app.prepare().then(() => {
     cors: { origin: process.env.NEXTAUTH_URL || 'http://localhost:3009', credentials: true },
   })
 
+  /** @type {import('socket.io').Server} */
   global.io = io
 
   io.on('connection', (socket) => {
