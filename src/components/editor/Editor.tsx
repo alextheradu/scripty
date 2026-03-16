@@ -72,7 +72,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
       const el = document.querySelector(`[data-line-id="${id}"]`)
       if (!el) return
       const rect = el.getBoundingClientRect()
-      const unique = [...new Set(characters)]
+      const unique = Array.from(new Set(characters))
       if (unique.length > 0) {
         setAutocomplete({ suggestions: unique, query: text.toUpperCase(), position: { top: rect.bottom + 4, left: rect.left } })
       } else {
@@ -94,6 +94,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
       return next
     })
     scheduleSave()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scriptId, userId, scheduleSave, socket])
 
   function handleKeyDown(e: React.KeyboardEvent, id: string) {
