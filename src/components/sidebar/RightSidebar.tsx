@@ -3,6 +3,10 @@ import { useState, useEffect } from 'react'
 import { Avatar } from '@/components/shared/Avatar'
 import type { ScriptLine } from '@/lib/editor/types'
 
+function safeParseContent(content: string): ScriptLine[] {
+  try { return JSON.parse(content) as ScriptLine[] } catch { return [] }
+}
+
 interface OnlineUser {
   id: string
   name: string
@@ -124,11 +128,11 @@ export function RightSidebar({ scriptId, open, onlineUsers, isAdmin, onRestore }
                   <button onClick={() => setPreviewing(previewing === rev.id ? null : rev.id)} style={smallBtn}>
                     {previewing === rev.id ? 'Close' : 'Preview'}
                   </button>
-                  <button onClick={() => onRestore(JSON.parse(rev.content) as ScriptLine[])} style={{ ...smallBtn, color: '#e8b86d' }}>Restore</button>
+                  <button onClick={() => onRestore(safeParseContent(rev.content) as ScriptLine[])} style={{ ...smallBtn, color: '#e8b86d' }}>Restore</button>
                 </div>
                 {previewing === rev.id && (
                   <div style={{ marginTop: '0.4rem', background: '#0f0f11', borderRadius: 4, padding: '0.4rem', fontSize: '0.625rem', color: '#6b6a64', fontFamily: '"Courier Prime", monospace', maxHeight: 180, overflowY: 'auto' }}>
-                    {(JSON.parse(rev.content) as ScriptLine[]).slice(0, 20).map(l => <div key={l.id}>{l.text || '—'}</div>)}
+                    {(safeParseContent(rev.content) as ScriptLine[]).slice(0, 20).map(l => <div key={l.id}>{l.text || '—'}</div>)}
                   </div>
                 )}
               </div>

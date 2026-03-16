@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { ScriptLine } from '@/lib/editor/types'
 
 interface CharacterPanelProps {
@@ -12,6 +12,7 @@ export function CharacterPanel({ lines, scriptId, onInsertCharacter }: Character
   const [dbNotes, setDbNotes] = useState<Record<string, string>>({})
   const [expanded, setExpanded] = useState<string | null>(null)
   const [newChar, setNewChar] = useState('')
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     fetch(`/api/characters/${scriptId}`)
@@ -32,15 +33,6 @@ export function CharacterPanel({ lines, scriptId, onInsertCharacter }: Character
   }, {})
 
   const characters = Object.entries(charMap).sort(([, a], [, b]) => b - a)
-
-  async function saveNote(name: string, note: string) {
-    setDbNotes(prev => ({ ...prev, [name]: note }))
-    await fetch(`/api/characters/${scriptId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, notes: note }),
-    })
-  }
 
   function addChar() {
     const name = newChar.trim().toUpperCase()
@@ -79,7 +71,18 @@ export function CharacterPanel({ lines, scriptId, onInsertCharacter }: Character
             <div style={{ padding: '0.25rem 1rem 0.5rem' }}>
               <textarea
                 value={dbNotes[name] ?? ''}
-                onChange={e => saveNote(name, e.target.value)}
+                onChange={e => {
+                  const note = e.target.value
+                  setDbNotes(prev => ({ ...prev, [name]: note }))
+                  if (saveTimer.current) clearTimeout(saveTimer.current)
+                  saveTimer.current = setTimeout(() => {
+                    fetch(`/api/characters/${scriptId}`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ name, notes: note }),
+                    })
+                  }, 800)
+                }}
                 placeholder="Notes, arc, description…"
                 rows={3}
                 style={{

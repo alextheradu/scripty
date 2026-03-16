@@ -35,13 +35,14 @@ export function ChatPanel({ scriptId, open, onToggle, onUnreadChange }: ChatPane
   }, [scriptId])
 
   useEffect(() => {
-    socket.on('chat:message', (msg: MessageData) => {
+    const handleChatMessage = (msg: MessageData) => {
       setMessages(prev => [...prev, msg])
       if (!open) {
         setUnread(u => { const n = u + 1; onUnreadChangeRef.current?.(n); return n })
       }
-    })
-    return () => { socket.off('chat:message') }
+    }
+    socket.on('chat:message', handleChatMessage)
+    return () => { socket.off('chat:message', handleChatMessage) }
   }, [socket, open])
 
   useEffect(() => {

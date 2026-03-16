@@ -179,14 +179,19 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
 
   // Listen for remote line updates
   useEffect(() => {
-    socket.on('line:update', ({ lineId, type, text, authorId }: { lineId: string; type: ElementType; text: string; authorId: string }) => {
+    const handleLineUpdate = ({ lineId, type, text, authorId }: { lineId: string; type: ElementType; text: string; authorId: string }) => {
       if (authorId === userId) return
       setLines(prev => prev.map(l => l.id === lineId ? { ...l, type, text } : l))
-    })
-    socket.on('cursor:move', ({ lineId, offset, user }: { lineId: string; offset: number; user: { name: string; color: string } }) => {
+    }
+    const handleCursorMove = ({ lineId, offset, user }: { lineId: string; offset: number; user: { name: string; color: string } }) => {
       setRemoteCursors(prev => new Map(prev).set(user.name, { lineId, offset, user }))
-    })
-    return () => { socket.off('line:update'); socket.off('cursor:move') }
+    }
+    socket.on('line:update', handleLineUpdate)
+    socket.on('cursor:move', handleCursorMove)
+    return () => {
+      socket.off('line:update', handleLineUpdate)
+      socket.off('cursor:move', handleCursorMove)
+    }
   }, [socket, userId])
 
   const changeActiveType = (type: ElementType) => {
