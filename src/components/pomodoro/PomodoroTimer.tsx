@@ -25,6 +25,7 @@ function playChime() {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5)
     osc.start(ctx.currentTime)
     osc.stop(ctx.currentTime + 0.5)
+    osc.onended = () => ctx.close()
   } catch {
     // AudioContext blocked — ignore
   }

@@ -82,10 +82,9 @@ export function buildPDFHtml(title: string, lines: ScriptLine[]): string {
 <html>
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <style>
   @page { margin: 1in 1in 1in 1.5in; size: letter; }
-  body { font-family: 'Courier Prime', monospace; font-size: 12pt; line-height: 1.5; }
+  body { font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 12pt; line-height: 1.5; }
   .title-page { page-break-after: always; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 9in; }
   .title-page h1 { font-size: 14pt; font-weight: bold; text-transform: uppercase; }
   .line { margin: 0; min-height: 1.5em; }
@@ -94,7 +93,7 @@ export function buildPDFHtml(title: string, lines: ScriptLine[]): string {
 </head>
 <body>
 <div class="title-page">
-  <h1>${title.replace(/</g, '&lt;')}</h1>
+  <h1>${title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</h1>
   <p>Written by</p>
   <p>${new Date().toLocaleDateString()}</p>
 </div>

@@ -13,12 +13,11 @@ export async function GET() {
   })
 
   // Streak calculation
-  const sortedDates = stats.map(s => s.date).sort()
   let longestStreak = 0, currentStreak = 0
   const today = new Date().toISOString().slice(0, 10)
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
 
-  const dateSet = new Set(sortedDates.filter((_, i) => stats[i].words > 0))
+  const dateSet = new Set(stats.filter(s => s.words > 0).map(s => s.date))
   let check: string | null = dateSet.has(today) ? today : (dateSet.has(yesterday) ? yesterday : null)
   while (check && dateSet.has(check)) {
     currentStreak++
@@ -59,7 +58,9 @@ export async function GET() {
   })
 
   const scriptStats = scripts.map(s => {
-    const lines = JSON.parse(s.content || '[]')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let lines: any[] = []
+    try { lines = JSON.parse(s.content || '[]') } catch { lines = [] }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const words = lines.reduce((acc: number, l: any) => acc + (l.text?.split(/\s+/).filter(Boolean).length ?? 0), 0)
     const pages = Math.max(1, Math.ceil(lines.length / 55))

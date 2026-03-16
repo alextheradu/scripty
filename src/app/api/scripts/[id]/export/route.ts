@@ -6,10 +6,14 @@ import { toFountain } from '@/lib/exporters/fountain'
 import { toFDX } from '@/lib/exporters/fdx'
 import { toPlainText } from '@/lib/exporters/plaintext'
 import { buildPDFHtml } from '@/lib/exporters/pdf'
+import { getScriptAccess } from '@/lib/scriptHelpers'
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions)
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const access = await getScriptAccess(params.id, session.user.id)
+  if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const format = req.nextUrl.searchParams.get('format') ?? 'pdf'
 
