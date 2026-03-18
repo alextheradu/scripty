@@ -4,13 +4,14 @@ import { authOptions } from '@/lib/auth'
 import { getScriptAccess } from '@/lib/scriptHelpers'
 import { prisma } from '@/lib/db'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const session = await getServerSession(authOptions)
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const access = await getScriptAccess(params.id, session.user.id)
+  const access = await getScriptAccess(id, session.user.id)
   if (!access) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   const revisions = await prisma.revision.findMany({
-    where: { scriptId: params.id },
+    where: { scriptId: id },
     orderBy: { createdAt: 'desc' },
     take: 50,
   })

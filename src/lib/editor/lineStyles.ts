@@ -14,9 +14,9 @@ export interface LineStyle {
 export const LINE_STYLES: Record<ElementType, LineStyle> = {
   SCENE_HEADING: { fontWeight: '700', textTransform: 'uppercase' },
   ACTION: {},
-  CHARACTER: { textTransform: 'uppercase', marginLeft: '3.7in', marginRight: '2in' },
-  PARENTHETICAL: { fontStyle: 'italic', marginLeft: '2.5in', marginRight: '2.4in' },
-  DIALOGUE: { marginLeft: '2.5in', marginRight: '1.5in' },
+  CHARACTER: { textTransform: 'uppercase', marginLeft: '2.2in', marginRight: '1in' },
+  PARENTHETICAL: { fontStyle: 'italic', marginLeft: '1.5in', marginRight: '1.4in' },
+  DIALOGUE: { marginLeft: '1in', marginRight: '0.5in' },
   TRANSITION: { textTransform: 'uppercase', textAlign: 'right' },
   SHOT: { textTransform: 'uppercase' },
   GENERAL: { color: '#888' },

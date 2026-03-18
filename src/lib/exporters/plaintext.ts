@@ -1,11 +1,12 @@
 import type { ScriptLine } from '../editor/types'
+import { formatDisplayDate, type ExportMetadata } from './types'
 
 function pad(text: string, left: number): string {
   return ' '.repeat(left) + text
 }
 
-export function toPlainText(title: string, lines: ScriptLine[]): string {
-  const header = `${title.toUpperCase()}\n\n`
+export function toPlainText(metadata: ExportMetadata, lines: ScriptLine[]): string {
+  const header = `${metadata.title.toUpperCase()}\nWritten by ${metadata.writtenBy}\n${formatDisplayDate(metadata.date)}\n\n`
   const body = lines.map(l => {
     const t = l.text.trim()
     if (!t) return ''

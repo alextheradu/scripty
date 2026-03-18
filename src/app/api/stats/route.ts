@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { addDays, diffDays, getDateKey } from '@/lib/dates'
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getServerSession(authOptions)
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -12,45 +13,40 @@ export async function GET() {
     orderBy: { date: 'asc' },
   })
 
-  // Streak calculation
-  let longestStreak = 0, currentStreak = 0
-  const today = new Date().toISOString().slice(0, 10)
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const revisions = await prisma.revision.findMany({
+    where: { authorId: session.user.id },
+    orderBy: { createdAt: 'asc' },
+    select: { createdAt: true },
+  })
 
-  const dateSet = new Set(stats.filter(s => s.words > 0).map(s => s.date))
-  let check: string | null = dateSet.has(today) ? today : (dateSet.has(yesterday) ? yesterday : null)
-  while (check && dateSet.has(check)) {
-    currentStreak++
-    const prev = new Date(new Date(check).getTime() - 86400000).toISOString().slice(0, 10)
-    check = prev
-  }
-  longestStreak = (() => {
-    let max = 0
-    let current = 0
-    let prevDate: string | null = null
-    for (const s of stats) {
-      if (s.words > 0) {
-        if (prevDate) {
-          const prev = new Date(prevDate)
-          const curr = new Date(s.date)
-          const diffDays = Math.round((curr.getTime() - prev.getTime()) / 86400000)
-          if (diffDays === 1) {
-            current++
-          } else {
-            current = 1
-          }
-        } else {
-          current = 1
-        }
-        prevDate = s.date
-        max = Math.max(max, current)
-      } else {
-        prevDate = null
-        current = 0
-      }
+  let longestStreak = 0, currentStreak = 0
+  const timeZone = req.headers.get('x-timezone') ?? undefined
+  const today = getDateKey(new Date(), timeZone)
+  const yesterday = addDays(today, -1)
+
+  const activityDays = new Set(revisions.map(revision => getDateKey(revision.createdAt, timeZone)))
+  if (activityDays.size === 0) {
+    for (const stat of stats) {
+      if (stat.words > 0 && stat.date <= today) activityDays.add(stat.date)
     }
-    return max
-  })()
+  }
+
+  let check: string | null = activityDays.has(today) ? today : (activityDays.has(yesterday) ? yesterday : null)
+  while (check && activityDays.has(check)) {
+    currentStreak++
+    check = addDays(check, -1)
+  }
+
+  const sortedActivityDays = Array.from(activityDays).sort()
+  if (sortedActivityDays.length > 0) {
+    longestStreak = 1
+    let current = 1
+    for (let i = 1; i < sortedActivityDays.length; i++) {
+      if (diffDays(sortedActivityDays[i - 1], sortedActivityDays[i]) === 1) current++
+      else current = 1
+      longestStreak = Math.max(longestStreak, current)
+    }
+  }
 
   const scripts = await prisma.script.findMany({
     where: { ownerId: session.user.id },
@@ -67,7 +63,7 @@ export async function GET() {
     return { id: s.id, title: s.title, words, pages }
   })
 
-  const totalWords = stats.reduce((acc, s) => acc + s.words, 0)
+  const totalWords = stats.filter(s => s.date <= today).reduce((acc, s) => acc + s.words, 0)
   const todayWords = stats.find(s => s.date === today)?.words ?? 0
   const totalPages = scriptStats.reduce((acc, s) => acc + s.pages, 0)
 
@@ -80,7 +76,7 @@ export async function GET() {
     todayWords,
     totalPages,
     scriptStats,
-    dailyStats: stats.map(s => ({ date: s.date, words: s.words })),
+    dailyStats: stats.filter(s => s.date <= today).map(s => ({ date: s.date, words: s.words })),
     hourCounts,
   })
 }

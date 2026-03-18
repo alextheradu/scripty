@@ -2,9 +2,10 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import { Editor } from '@/components/editor/Editor'
 
-export default async function SharedScriptPage({ params }: { params: { token: string } }) {
+export default async function SharedScriptPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params
   const script = await prisma.script.findUnique({
-    where: { shareToken: params.token },
+    where: { shareToken: token },
   })
   if (!script || !script.publicAccess) notFound()
 

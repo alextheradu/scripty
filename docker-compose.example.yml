@@ -1,0 +1,16 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scripty
+      POSTGRES_PASSWORD: example
+      POSTGRES_DB: scripty
+    ports:
+      - "5460:5432"
+    volumes:
+      - scripty_pg_data:/var/lib/postgresql/data
+
+volumes:
+  scripty_pg_data:

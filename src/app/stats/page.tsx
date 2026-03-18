@@ -1,16 +1,18 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { AppNav } from '@/components/shared/AppNav'
 import { ContributionGraph } from '@/components/stats/ContributionGraph'
 import { WordsChart } from '@/components/stats/WordsChart'
 
 export default function StatsPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null)
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   useEffect(() => {
-    fetch('/api/stats').then(r => r.json()).then(setData)
-  }, [])
+    fetch('/api/stats', { headers: { 'x-timezone': timeZone } }).then(r => r.json()).then(setData)
+  }, [timeZone])
 
   if (!data) return (
     <div style={{ minHeight: '100vh', background: '#0f0f11', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b6a64', fontFamily: 'Syne, sans-serif' }}>
@@ -27,11 +29,7 @@ export default function StatsPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0f0f11', color: '#e8e6de' }}>
-      <header style={{ height: 52, background: '#1a1a1f', borderBottom: '1px solid #2a2a30', display: 'flex', alignItems: 'center', padding: '0 2rem', gap: '1rem' }}>
-        <Link href="/" style={{ color: '#e8b86d', fontFamily: '"Playfair Display", serif', fontSize: '1.25rem', textDecoration: 'none' }}>Scripty</Link>
-        <span style={{ color: '#2a2a30' }}>›</span>
-        <span style={{ fontFamily: 'Syne, sans-serif', fontSize: '0.875rem', color: '#6b6a64' }}>Stats</span>
-      </header>
+      <AppNav />
 
       <main style={{ maxWidth: 900, margin: '0 auto', padding: '2rem' }}>
         <h1 style={{ fontFamily: '"Playfair Display", serif', fontSize: '2rem', marginBottom: '1.5rem' }}>Writing Stats</h1>

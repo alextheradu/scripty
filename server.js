@@ -1,3 +1,6 @@
+const path = require('path')
+require('dotenv').config({ path: path.join(__dirname, '.env') })
+
 const { createServer } = require('http')
 const { parse } = require('url')
 const next = require('next')
@@ -42,6 +45,8 @@ app.prepare().then(() => {
 
     socket.on('script:leave', ({ scriptId }) => {
       socket.leave(`script:${scriptId}`)
+      io.to(`script:${scriptId}`).emit('cursor:clear', { socketId: socket.id })
+      io.to(`script:${scriptId}`).emit('selection:update', { socketId: socket.id, selection: null })
       io.to(`script:${scriptId}`).emit('presence:update', getRoomPresence(io, scriptId))
     })
 
@@ -55,6 +60,15 @@ app.prepare().then(() => {
     socket.on('cursor:move', (data) => {
       socket.to(`script:${data.scriptId}`).emit('cursor:move', {
         ...data,
+        socketId: socket.id,
+        user: { ...socket.data.user, color: socket.data.color },
+      })
+    })
+
+    socket.on('selection:update', (data) => {
+      socket.to(`script:${data.scriptId}`).emit('selection:update', {
+        socketId: socket.id,
+        selection: data.selection ?? null,
         user: { ...socket.data.user, color: socket.data.color },
       })
     })
@@ -65,7 +79,11 @@ app.prepare().then(() => {
 
     socket.on('disconnect', () => {
       const { scriptId } = socket.data
-      if (scriptId) io.to(`script:${scriptId}`).emit('presence:update', getRoomPresence(io, scriptId))
+      if (scriptId) {
+        io.to(`script:${scriptId}`).emit('cursor:clear', { socketId: socket.id })
+        io.to(`script:${scriptId}`).emit('selection:update', { socketId: socket.id, selection: null })
+        io.to(`script:${scriptId}`).emit('presence:update', getRoomPresence(io, scriptId))
+      }
     })
   })
 

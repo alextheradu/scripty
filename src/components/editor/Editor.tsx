@@ -1,6 +1,7 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ScriptLine, ElementType } from '@/lib/editor/types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Avatar } from '@/components/shared/Avatar'
+import type { ScriptComment, ScriptLine, ElementType, SelectionRange } from '@/lib/editor/types'
 import { ENTER_NEXT, DOUBLE_ENTER_NEXT, ELEMENT_CYCLE } from '@/lib/editor/types'
 import { EditorLine, EditorLineHandle } from './EditorLine'
 import { Toolbar } from './Toolbar'
@@ -10,6 +11,10 @@ import { getSocket } from '@/lib/socket'
 import { CollaboratorCursor } from './CollaboratorCursor'
 
 const LINES_PER_PAGE = 55
+const PAPER_WIDTH = '8.5in'
+const GUTTER_WIDTH = 308
+const THREAD_WIDTH = 280
+const QUICK_REACTIONS = ['👍', '🎬', '👀'] as const
 
 interface EditorProps {
   scriptId: string
@@ -18,6 +23,26 @@ interface EditorProps {
   readOnly?: boolean
   onLinesChange?: (lines: ScriptLine[]) => void
   onEdit?: () => void
+}
+
+interface LiveCursor {
+  socketId: string
+  lineId: string
+  offset: number
+  user: { name: string; color: string }
+}
+
+interface LiveSelection {
+  socketId: string
+  range: SelectionRange
+  user: { name: string; color: string }
+}
+
+interface OverlayRect {
+  top: number
+  left: number
+  width: number
+  height: number
 }
 
 export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange, onEdit }: EditorProps) {
@@ -29,16 +54,28 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
     suggestions: string[]; query: string; position: { top: number; left: number }
   } | null>(null)
   const [lastEnterEmpty, setLastEnterEmpty] = useState<string | null>(null)
-  const [remoteCursors, setRemoteCursors] = useState<
-    Map<string, { lineId: string; offset: number; user: { name: string; color: string } }>
-  >(new Map())
+  const [remoteCursors, setRemoteCursors] = useState<Map<string, LiveCursor>>(new Map())
+  const [remoteSelections, setRemoteSelections] = useState<Map<string, LiveSelection>>(new Map())
+  const [localSelection, setLocalSelection] = useState<SelectionRange | null>(null)
+  const [comments, setComments] = useState<ScriptComment[]>([])
+  const [commentsOpen, setCommentsOpen] = useState(true)
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
+  const [draftAnchor, setDraftAnchor] = useState<SelectionRange | null>(null)
+  const [commentDraft, setCommentDraft] = useState('')
+  const [commenting, setCommenting] = useState(false)
+  const [commentError, setCommentError] = useState<string | null>(null)
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
+  const [pendingReplies, setPendingReplies] = useState<Record<string, boolean>>({})
   const lineRefs = useRef<Map<string, EditorLineHandle>>(new Map())
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
+  const selectionFrame = useRef<number>()
   const socket = getSocket()
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   const activeLine = lines.find(l => l.id === activeId)
   const locations = lines.filter(l => l.type === 'SCENE_HEADING').map(l => l.text).filter(Boolean)
   const characters = lines.filter(l => l.type === 'CHARACTER').map(l => l.text.toUpperCase()).filter(Boolean)
+  const lineOrder = useMemo(() => new Map(lines.map((line, index) => [line.id, index])), [lines])
 
   const scheduleSave = useCallback(() => {
     clearTimeout(saveTimer.current)
@@ -47,20 +84,30 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
         onLinesChange?.(current)
         fetch(`/api/scripts/${scriptId}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'x-timezone': timeZone },
           body: JSON.stringify({ content: current }),
         })
         return current
       })
     }, 2000)
-  }, [scriptId, onLinesChange])
+  }, [scriptId, onLinesChange, timeZone])
+
+  useEffect(() => {
+    fetch(`/api/scripts/${scriptId}/comments`)
+      .then(async res => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error ?? 'Failed to load comments')
+        setComments(data.comments ?? [])
+      })
+      .catch(() => {})
+  }, [scriptId])
 
   function updateAutocomplete(id: string, text: string, currentLines: ScriptLine[]) {
     const line = currentLines.find(l => l.id === id)
     if (!line) return
 
     if (line.type === 'SCENE_HEADING') {
-      const el = document.querySelector(`[data-line-id="${id}"]`)
+      const el = getLineElement(id)
       if (!el) return
       const rect = el.getBoundingClientRect()
       const PREFIXES = ['INT. ', 'EXT. ', 'INT./EXT. ']
@@ -74,7 +121,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
         setAutocomplete(null)
       }
     } else if (line.type === 'CHARACTER') {
-      const el = document.querySelector(`[data-line-id="${id}"]`)
+      const el = getLineElement(id)
       if (!el) return
       const rect = el.getBoundingClientRect()
       const unique = Array.from(new Set(characters))
@@ -102,7 +149,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
     })
     scheduleSave()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scriptId, userId, scheduleSave, socket, onEdit])
+  }, [scriptId, userId, scheduleSave, socket, onEdit, readOnly])
 
   function handleKeyDown(e: React.KeyboardEvent, id: string) {
     const line = lines.find(l => l.id === id)
@@ -123,18 +170,25 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
         return
       }
 
-      if (isEmpty && !isDoubleEnter) {
-        setLastEnterEmpty(id)
-      } else {
-        setLastEnterEmpty(null)
-      }
+      if (isEmpty && !isDoubleEnter) setLastEnterEmpty(id)
+      else setLastEnterEmpty(null)
+
+      const cursorOffset = lineRefs.current.get(id)?.getOffset() ?? 0
+      const atLineStart = cursorOffset === 0 && line.text.length > 0
 
       const newId = crypto.randomUUID()
       const newType = ENTER_NEXT[line.type]
       const newLine: ScriptLine = { id: newId, type: newType, text: '' }
-      setLines(prev => [...prev.slice(0, idx + 1), newLine, ...prev.slice(idx + 1)])
-      setActiveId(newId)
-      setTimeout(() => lineRefs.current.get(newId)?.focus(), 0)
+
+      if (atLineStart) {
+        // Insert blank line above, keep focus on current line (which shifts down)
+        setLines(prev => [...prev.slice(0, idx), newLine, ...prev.slice(idx)])
+        setTimeout(() => lineRefs.current.get(id)?.focus(0), 0)
+      } else {
+        setLines(prev => [...prev.slice(0, idx + 1), newLine, ...prev.slice(idx + 1)])
+        setActiveId(newId)
+        setTimeout(() => lineRefs.current.get(newId)?.focus(), 0)
+      }
     }
 
     if (e.key === 'Tab') {
@@ -169,104 +223,842 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
       setActiveId(nextId)
       lineRefs.current.get(nextId)?.focus()
     }
-
-    // Emit cursor position
-    socket.emit('cursor:move', {
-      scriptId,
-      lineId: id,
-      offset: lineRefs.current.get(id)?.getOffset() ?? 0,
-    })
   }
 
-  // Listen for remote line updates
   useEffect(() => {
     const handleLineUpdate = ({ lineId, type, text, authorId }: { lineId: string; type: ElementType; text: string; authorId: string }) => {
       if (authorId === userId) return
       setLines(prev => prev.map(l => l.id === lineId ? { ...l, type, text } : l))
     }
-    const handleCursorMove = ({ lineId, offset, user }: { lineId: string; offset: number; user: { name: string; color: string } }) => {
-      setRemoteCursors(prev => new Map(prev).set(user.name, { lineId, offset, user }))
+
+    const handleCursorMove = (data: LiveCursor) => {
+      setRemoteCursors(prev => new Map(prev).set(data.socketId, data))
     }
+
+    const handleCursorClear = ({ socketId }: { socketId: string }) => {
+      setRemoteCursors(prev => {
+        const next = new Map(prev)
+        next.delete(socketId)
+        return next
+      })
+    }
+
+    const handleSelectionUpdate = ({ socketId, selection, user }: { socketId: string; selection: SelectionRange | null; user: { name: string; color: string } }) => {
+      setRemoteSelections(prev => {
+        const next = new Map(prev)
+        if (!selection) next.delete(socketId)
+        else next.set(socketId, { socketId, range: selection, user })
+        return next
+      })
+    }
+
+    const handleCommentCreate = ({ comment }: { comment: ScriptComment }) => {
+      setComments(prev => prev.some(existing => existing.id === comment.id) ? prev : [...prev, comment])
+    }
+
+    const handleCommentUpdate = ({ comment }: { comment: ScriptComment }) => {
+      setComments(prev => prev.map(existing => existing.id === comment.id ? comment : existing))
+    }
+
     socket.on('line:update', handleLineUpdate)
     socket.on('cursor:move', handleCursorMove)
+    socket.on('cursor:clear', handleCursorClear)
+    socket.on('selection:update', handleSelectionUpdate)
+    socket.on('comment:create', handleCommentCreate)
+    socket.on('comment:update', handleCommentUpdate)
+
     return () => {
       socket.off('line:update', handleLineUpdate)
       socket.off('cursor:move', handleCursorMove)
+      socket.off('cursor:clear', handleCursorClear)
+      socket.off('selection:update', handleSelectionUpdate)
+      socket.off('comment:create', handleCommentCreate)
+      socket.off('comment:update', handleCommentUpdate)
     }
   }, [socket, userId])
+
+  useEffect(() => {
+    if (readOnly || typeof document === 'undefined') return
+
+    const publishSelection = () => {
+      cancelAnimationFrame(selectionFrame.current ?? 0)
+      selectionFrame.current = requestAnimationFrame(() => {
+        const selection = window.getSelection()
+        const paperEl = getPaperElement()
+        if (!selection || selection.rangeCount === 0 || !paperEl) {
+          setLocalSelection(null)
+          socket.emit('selection:update', { scriptId, selection: null })
+          return
+        }
+
+        const anchorLineId = getNodeLineId(selection.anchorNode)
+        const focusLineId = getNodeLineId(selection.focusNode)
+        const anchorLineEl = anchorLineId ? getLineElement(anchorLineId) : null
+        const focusLineEl = focusLineId ? getLineElement(focusLineId) : null
+
+        if (!anchorLineId || !focusLineId || !anchorLineEl || !focusLineEl || !paperEl.contains(anchorLineEl) || !paperEl.contains(focusLineEl)) {
+          setLocalSelection(null)
+          socket.emit('selection:update', { scriptId, selection: null })
+          return
+        }
+
+        const anchorOffset = getOffsetWithinLine(selection.anchorNode, selection.anchorOffset, anchorLineEl)
+        const focusOffset = getOffsetWithinLine(selection.focusNode, selection.focusOffset, focusLineEl)
+        const normalized = normalizeRange({
+          startLineId: anchorLineId,
+          endLineId: focusLineId,
+          startOffset: anchorOffset,
+          endOffset: focusOffset,
+          text: selection.toString(),
+        }, lineOrder)
+
+        if (!normalized) return
+
+        socket.emit('cursor:move', {
+          scriptId,
+          lineId: focusLineId,
+          offset: focusOffset,
+        })
+
+        if (selection.isCollapsed || !normalized.text) {
+          setLocalSelection(null)
+          socket.emit('selection:update', { scriptId, selection: null })
+          return
+        }
+
+        setLocalSelection(normalized)
+        socket.emit('selection:update', { scriptId, selection: normalized })
+      })
+    }
+
+    document.addEventListener('selectionchange', publishSelection)
+    return () => {
+      cancelAnimationFrame(selectionFrame.current ?? 0)
+      document.removeEventListener('selectionchange', publishSelection)
+    }
+  }, [lineOrder, readOnly, scriptId, socket])
 
   const changeActiveType = (type: ElementType) => {
     setLines(prev => prev.map(l => l.id === activeId ? { ...l, type } : l))
   }
 
+  const localSelectionRects = localSelection ? getRangeRects(localSelection, lines, lineOrder) : []
+  const remoteSelectionOverlays = Array.from(remoteSelections.values()).flatMap(item =>
+    getRangeRects(item.range, lines, lineOrder).map((rect, index) => ({
+      key: `${item.socketId}-${index}`,
+      rect,
+      color: item.user.color,
+    }))
+  )
+  const commentOverlays = comments
+    .filter(comment => !comment.resolvedAt)
+    .flatMap(comment =>
+      getRangeRects(comment, lines, lineOrder).map((rect, index) => ({
+        key: `${comment.id}-${index}`,
+        rect,
+        active: comment.id === activeCommentId,
+      }))
+    )
+  const draftTop = draftAnchor ? getAnchorTop(draftAnchor, lines, lineOrder) : 24
+  const selectionTop = localSelectionRects.length ? Math.min(...localSelectionRects.map(rect => rect.top)) : null
+
+  async function handleCreateComment() {
+    if (!draftAnchor || !commentDraft.trim()) return
+    setCommenting(true)
+    setCommentError(null)
+
+    const res = await fetch(`/api/scripts/${scriptId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        body: commentDraft.trim(),
+        quotedText: draftAnchor.text,
+        startLineId: draftAnchor.startLineId,
+        endLineId: draftAnchor.endLineId,
+        startOffset: draftAnchor.startOffset,
+        endOffset: draftAnchor.endOffset,
+      }),
+    })
+
+    const data = await res.json()
+    setCommenting(false)
+    if (!res.ok) {
+      setCommentError(data.error ?? 'Failed to add comment.')
+      return
+    }
+
+    const newComment = data.comment as ScriptComment
+    setComments(prev => prev.some(existing => existing.id === newComment.id) ? prev : [...prev, newComment])
+    setActiveCommentId(newComment.id)
+    setCommentDraft('')
+    setDraftAnchor(null)
+    setLocalSelection(null)
+    setCommentsOpen(true)
+    window.getSelection()?.removeAllRanges()
+  }
+
+  async function handleReply(commentId: string) {
+    const body = replyDrafts[commentId]?.trim()
+    if (!body) return
+    setPendingReplies(prev => ({ ...prev, [commentId]: true }))
+
+    const res = await fetch(`/api/scripts/${scriptId}/comments/${commentId}/replies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    })
+
+    const data = await res.json()
+    setPendingReplies(prev => ({ ...prev, [commentId]: false }))
+    if (!res.ok) {
+      setCommentError(data.error ?? 'Failed to reply.')
+      return
+    }
+
+    setComments(prev => prev.map(comment => comment.id === commentId ? data.comment : comment))
+    setReplyDrafts(prev => ({ ...prev, [commentId]: '' }))
+  }
+
+  async function toggleReaction(commentId: string, emoji: string) {
+    const res = await fetch(`/api/scripts/${scriptId}/comments/${commentId}/reactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ emoji }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      setCommentError(data.error ?? 'Failed to react.')
+      return
+    }
+    setComments(prev => prev.map(comment => comment.id === commentId ? data.comment : comment))
+  }
+
+  async function toggleResolve(comment: ScriptComment) {
+    const res = await fetch(`/api/scripts/${scriptId}/comments/${comment.id}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resolved: !comment.resolvedAt }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      setCommentError(data.error ?? 'Failed to update comment.')
+      return
+    }
+    setComments(prev => prev.map(existing => existing.id === comment.id ? data.comment : existing))
+    if (data.comment.resolvedAt && activeCommentId === comment.id) setActiveCommentId(null)
+  }
+
+  function openDraftThread() {
+    if (!localSelection) return
+    setDraftAnchor(localSelection)
+    setLocalSelection(null)
+    setCommentDraft('')
+    setCommentsOpen(true)
+    setCommentError(null)
+    window.getSelection()?.removeAllRanges()
+  }
+
+  function focusComment(comment: ScriptComment) {
+    setCommentsOpen(true)
+    setActiveCommentId(comment.id)
+    setDraftAnchor(null)
+    document.querySelector(`[data-line-id="${comment.startLineId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  const remoteCursorOverlays = Array.from(remoteCursors.values()).map(cursor => {
+    const point = getCaretPoint(cursor.lineId, cursor.offset)
+    if (!point) return null
+    return (
+      <CollaboratorCursor
+        key={cursor.socketId}
+        name={cursor.user.name}
+        color={cursor.user.color}
+        top={point.top}
+        left={point.left}
+      />
+    )
+  })
+
+  const commentCards = useMemo(() => {
+    const unresolved = comments
+      .filter(comment => !comment.resolvedAt)
+      .map(comment => ({
+        comment,
+        top: getAnchorTop(comment, lines, lineOrder),
+      }))
+      .sort((a, b) => a.top - b.top)
+
+    let cursorTop = 0
+    return unresolved.map(item => {
+      const estimatedHeight = 144 + item.comment.replies.length * 48
+      const top = Math.max(item.top, cursorTop)
+      cursorTop = top + estimatedHeight + 8
+      return { ...item, top }
+    })
+  }, [comments, lines, lineOrder])
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {!readOnly && <Toolbar activeType={activeLine?.type ?? 'ACTION'} onChangeType={changeActiveType} />}
+    <div style={{ display: 'flex', height: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+        {!readOnly && (
+          <Toolbar
+            activeType={activeLine?.type ?? 'ACTION'}
+            onChangeType={changeActiveType}
+            commentsCount={comments.filter(comment => !comment.resolvedAt).length}
+            commentsOpen={commentsOpen}
+            onToggleComments={() => setCommentsOpen(open => !open)}
+          />
+        )}
 
-      <div style={{
-        flex: 1, overflowY: 'auto', background: '#0f0f11',
-        display: 'flex', justifyContent: 'center', padding: '2rem 0',
-      }}>
-        {/* Paper */}
-        <div
-          data-paper
-          style={{
-            background: '#fffef7', width: '8.5in', minHeight: '11in',
-            padding: '1in 1in 1in 1.5in',
-            boxShadow: '0 0 60px rgba(0,0,0,0.6)', position: 'relative',
-          }}
-        >
-          {lines.map((line, i) => {
-            const showPageBreak = i > 0 && i % LINES_PER_PAGE === 0
-            const pageNum = Math.floor(i / LINES_PER_PAGE) + 1
-            return (
-              <div key={line.id}>
-                {showPageBreak && <PageBreak pageNumber={pageNum} />}
-                <EditorLine
-                  ref={el => { if (el) lineRefs.current.set(line.id, el); else lineRefs.current.delete(line.id) }}
-                  line={line}
-                  isActive={line.id === activeId}
-                  onChange={readOnly ? () => {} : updateLine}
-                  onKeyDown={readOnly ? () => {} : handleKeyDown}
-                  onClick={id => setActiveId(id)}
-                  readOnly={readOnly}
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          background: '#0f0f11',
+          display: 'flex',
+          justifyContent: 'center',
+          padding: '1.15rem 0',
+        }}>
+          <div
+            style={{
+              position: 'relative',
+              width: `calc(${PAPER_WIDTH} + ${GUTTER_WIDTH}px)`,
+              minWidth: `calc(${PAPER_WIDTH} + ${GUTTER_WIDTH}px)`,
+              paddingRight: commentsOpen ? `${GUTTER_WIDTH}px` : '0',
+            }}
+          >
+            <div
+              data-paper
+              style={{
+                background: '#fffef7',
+                width: PAPER_WIDTH,
+                minHeight: '11in',
+                padding: '1in 1in 1in 1.5in',
+                boxShadow: '0 0 60px rgba(0,0,0,0.6)',
+                position: 'relative',
+              }}
+            >
+              {commentOverlays.map(({ key, rect, active }) => (
+                <div
+                  key={key}
+                  style={{
+                    ...highlightRectStyle,
+                    top: rect.top,
+                    left: rect.left,
+                    width: rect.width,
+                    height: rect.height,
+                    background: active ? 'rgba(232,184,109,0.34)' : 'rgba(232,184,109,0.14)',
+                  }}
                 />
-                {Array.from(remoteCursors.values())
-                  .filter(c => c.lineId === line.id)
-                  .map(c => {
-                    const el = document.querySelector(`[data-line-id="${line.id}"]`)
-                    const paperEl = document.querySelector('[data-paper]')
-                    if (!el || !paperEl) return null
-                    const rect = el.getBoundingClientRect()
-                    const paperRect = paperEl.getBoundingClientRect()
-                    return (
-                      <CollaboratorCursor
-                        key={c.user.name}
-                        name={c.user.name}
-                        color={c.user.color}
-                        top={rect.top - paperRect.top}
-                        left={rect.left - paperRect.left + c.offset * 7.2}
-                      />
-                    )
-                  })}
-              </div>
-            )
-          })}
-        </div>
-      </div>
+              ))}
 
-      {autocomplete && !readOnly && (
-        <Autocomplete
-          suggestions={autocomplete.suggestions}
-          query={autocomplete.query}
-          position={autocomplete.position}
-          onSelect={value => {
-            setLines(prev => prev.map(l => l.id === activeId ? { ...l, text: value } : l))
-            setAutocomplete(null)
-          }}
-          onDismiss={() => setAutocomplete(null)}
-        />
-      )}
+              {remoteSelectionOverlays.map(({ key, rect, color }) => (
+                <div
+                  key={key}
+                  style={{
+                    ...highlightRectStyle,
+                    top: rect.top,
+                    left: rect.left,
+                    width: rect.width,
+                    height: rect.height,
+                    background: alphaColor(color, 0.24),
+                  }}
+                />
+              ))}
+
+              {lines.map((line, i) => {
+                const showPageBreak = i > 0 && i % LINES_PER_PAGE === 0
+                const pageNum = Math.floor(i / LINES_PER_PAGE) + 1
+                return (
+                  <div key={line.id}>
+                    {showPageBreak && <PageBreak pageNumber={pageNum} />}
+                    <EditorLine
+                      ref={el => { if (el) lineRefs.current.set(line.id, el); else lineRefs.current.delete(line.id) }}
+                      line={line}
+                      isActive={line.id === activeId}
+                      onChange={readOnly ? () => {} : updateLine}
+                      onKeyDown={readOnly ? () => {} : handleKeyDown}
+                      onClick={id => setActiveId(id)}
+                      readOnly={readOnly}
+                    />
+                  </div>
+                )
+              })}
+
+              {remoteCursorOverlays}
+            </div>
+
+            {commentsOpen && (
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: `calc(${PAPER_WIDTH} + 18px)`,
+                width: THREAD_WIDTH,
+                minHeight: '100%',
+              }}>
+                {!readOnly && !draftAnchor && localSelection && selectionTop !== null && (
+                  <button
+                    onClick={openDraftThread}
+                    style={{
+                      ...commentIconStyle,
+                      top: Math.max(selectionTop, 14),
+                    }}
+                    title="Comment on selection"
+                  >
+                    +
+                  </button>
+                )}
+
+                {!readOnly && draftAnchor && (
+                  <div style={{ ...threadCardStyle, top: draftTop, borderColor: '#52c0e0' }}>
+                    <div style={threadHeaderStyle}>
+                      <div>
+                        <div style={threadTitleStyle}>New comment</div>
+                        <div style={threadQuoteStyle}>{draftAnchor.text}</div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setDraftAnchor(null)
+                          setCommentDraft('')
+                          setCommentError(null)
+                        }}
+                        style={threadSmallBtnStyle}
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <textarea
+                      value={commentDraft}
+                      onChange={e => setCommentDraft(e.target.value)}
+                      placeholder="Add your comment…"
+                      style={threadTextareaStyle}
+                    />
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.45rem' }}>
+                      <button
+                        onClick={() => {
+                          setDraftAnchor(null)
+                          setCommentDraft('')
+                          setCommentError(null)
+                        }}
+                        style={threadSmallBtnStyle}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleCreateComment}
+                        disabled={commenting || !commentDraft.trim()}
+                        style={threadPrimaryBtnStyle}
+                      >
+                        {commenting ? 'Saving…' : 'Comment'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {commentCards.map(({ comment, top }) => {
+                  const authorName = comment.author.displayName ?? comment.author.name ?? comment.author.email ?? 'Unknown'
+                  const authorImage = comment.author.profileImage ?? comment.author.image
+                  const active = activeCommentId === comment.id
+                  const reactionSummary = summarizeReactions(comment.reactions)
+
+                  return (
+                    <div
+                      key={comment.id}
+                      style={{
+                        ...threadCardStyle,
+                        top,
+                        borderColor: active ? '#e8b86d' : '#2a2a30',
+                        background: active ? '#1f1a14' : '#17171c',
+                      }}
+                      onClick={() => focusComment(comment)}
+                    >
+                      <div style={threadHeaderStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
+                          <Avatar src={authorImage} name={authorName} size={24} />
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ color: '#e8e6de', fontSize: '0.74rem', fontWeight: 700 }}>{authorName}</div>
+                            <div style={{ color: '#6b6a64', fontSize: '0.62rem' }}>
+                              {new Date(comment.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={e => {
+                            e.stopPropagation()
+                            toggleResolve(comment)
+                          }}
+                          style={{ ...resolveBtnStyle, color: comment.resolvedAt ? '#52e0b8' : '#8f8d86' }}
+                          title={comment.resolvedAt ? 'Reopen comment' : 'Resolve comment'}
+                        >
+                          ✓
+                        </button>
+                      </div>
+
+                      <div style={threadQuoteStyle}>{comment.quotedText}</div>
+                      <div style={threadBodyStyle}>{comment.body}</div>
+
+                      {comment.replies.length > 0 && (
+                        <div style={{ marginTop: '0.45rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          {comment.replies.map(reply => {
+                            const replyName = reply.author.displayName ?? reply.author.name ?? reply.author.email ?? 'Unknown'
+                            const replyImage = reply.author.profileImage ?? reply.author.image
+                            return (
+                              <div key={reply.id} style={replyRowStyle}>
+                                <Avatar src={replyImage} name={replyName} size={18} />
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ color: '#e8e6de', fontSize: '0.64rem', fontWeight: 600 }}>{replyName}</div>
+                                  <div style={{ color: '#c6c3ba', fontSize: '0.67rem', lineHeight: 1.3 }}>{reply.body}</div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.45rem' }}>
+                        {QUICK_REACTIONS.map(emoji => {
+                          const info = reactionSummary.find(item => item.emoji === emoji)
+                          const activeReaction = !!comment.reactions.find(reaction => reaction.userId === userId && reaction.emoji === emoji)
+                          return (
+                            <button
+                              key={emoji}
+                              onClick={e => {
+                                e.stopPropagation()
+                                toggleReaction(comment.id, emoji)
+                              }}
+                              style={{
+                                ...reactionBtnStyle,
+                                borderColor: activeReaction ? '#e8b86d' : '#2a2a30',
+                                color: activeReaction ? '#e8b86d' : '#8f8d86',
+                              }}
+                            >
+                              {emoji}{info ? ` ${info.count}` : ''}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.45rem' }}>
+                        <input
+                          value={replyDrafts[comment.id] ?? ''}
+                          onChange={e => setReplyDrafts(prev => ({ ...prev, [comment.id]: e.target.value }))}
+                          onClick={e => e.stopPropagation()}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              handleReply(comment.id)
+                            }
+                          }}
+                          placeholder="Reply"
+                          style={replyInputStyle}
+                        />
+                        <button
+                          onClick={e => {
+                            e.stopPropagation()
+                            handleReply(comment.id)
+                          }}
+                          disabled={pendingReplies[comment.id] || !(replyDrafts[comment.id] ?? '').trim()}
+                          style={threadPrimaryBtnStyle}
+                        >
+                          {pendingReplies[comment.id] ? '…' : '↵'}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {autocomplete && !readOnly && (
+          <Autocomplete
+            suggestions={autocomplete.suggestions}
+            query={autocomplete.query}
+            position={autocomplete.position}
+            onSelect={value => {
+              setLines(prev => prev.map(l => l.id === activeId ? { ...l, text: value } : l))
+              setAutocomplete(null)
+            }}
+            onDismiss={() => setAutocomplete(null)}
+          />
+        )}
+
+        {commentError && (
+          <div style={{ color: '#e05252', fontSize: '0.74rem', padding: '0.38rem 0.85rem', background: '#141419' }}>
+            {commentError}
+          </div>
+        )}
+      </div>
     </div>
   )
+}
+
+function getPaperElement(): HTMLElement | null {
+  if (typeof document === 'undefined') return null
+  return document.querySelector('[data-paper]')
+}
+
+function getLineElement(lineId: string): HTMLElement | null {
+  if (typeof document === 'undefined') return null
+  return document.querySelector(`[data-line-id="${lineId}"]`)
+}
+
+function getNodeLineId(node: Node | null): string | null {
+  if (!node) return null
+  const element = node instanceof HTMLElement ? node : node.parentElement
+  return element?.closest('[data-line-id]')?.getAttribute('data-line-id') ?? null
+}
+
+function getOffsetWithinLine(node: Node | null, offset: number, lineEl: HTMLElement): number {
+  const range = document.createRange()
+  range.selectNodeContents(lineEl)
+  try {
+    range.setEnd(node ?? lineEl, offset)
+    return range.toString().length
+  } catch {
+    return 0
+  }
+}
+
+function normalizeRange(range: SelectionRange, lineOrder: Map<string, number>): SelectionRange | null {
+  const startIndex = lineOrder.get(range.startLineId)
+  const endIndex = lineOrder.get(range.endLineId)
+  if (startIndex === undefined || endIndex === undefined) return null
+
+  if (startIndex < endIndex || (startIndex === endIndex && range.startOffset <= range.endOffset)) {
+    return range
+  }
+
+  return {
+    startLineId: range.endLineId,
+    endLineId: range.startLineId,
+    startOffset: range.endOffset,
+    endOffset: range.startOffset,
+    text: range.text,
+  }
+}
+
+function getCaretPoint(lineId: string, offset: number): { top: number; left: number } | null {
+  const lineEl = getLineElement(lineId)
+  const paperEl = getPaperElement()
+  if (!lineEl || !paperEl) return null
+
+  const range = document.createRange()
+  const paperRect = paperEl.getBoundingClientRect()
+
+  if (lineEl.firstChild?.nodeType === Node.TEXT_NODE) {
+    const textNode = lineEl.firstChild as Text
+    range.setStart(textNode, Math.min(offset, textNode.length))
+    range.collapse(true)
+  } else {
+    range.selectNodeContents(lineEl)
+    range.collapse(true)
+  }
+
+  const rect = range.getClientRects()[0] ?? lineEl.getBoundingClientRect()
+  return {
+    top: rect.top - paperRect.top,
+    left: rect.left - paperRect.left,
+  }
+}
+
+function getRangeRects(range: Pick<SelectionRange, 'startLineId' | 'endLineId' | 'startOffset' | 'endOffset'>, lines: ScriptLine[], lineOrder: Map<string, number>): OverlayRect[] {
+  const startIndex = lineOrder.get(range.startLineId)
+  const endIndex = lineOrder.get(range.endLineId)
+  const paperEl = getPaperElement()
+  if (startIndex === undefined || endIndex === undefined || !paperEl) return []
+
+  const paperRect = paperEl.getBoundingClientRect()
+  const rects: OverlayRect[] = []
+
+  for (let index = startIndex; index <= endIndex; index += 1) {
+    const line = lines[index]
+    const lineEl = getLineElement(line.id)
+    if (!lineEl || lineEl.firstChild?.nodeType !== Node.TEXT_NODE) continue
+
+    const textNode = lineEl.firstChild as Text
+    const textLength = textNode.length
+    const startOffset = index === startIndex ? range.startOffset : 0
+    const endOffset = index === endIndex ? range.endOffset : textLength
+    if (startOffset === endOffset) continue
+
+    const domRange = document.createRange()
+    domRange.setStart(textNode, Math.min(startOffset, textLength))
+    domRange.setEnd(textNode, Math.min(endOffset, textLength))
+
+    for (const clientRect of Array.from(domRange.getClientRects())) {
+      rects.push({
+        top: clientRect.top - paperRect.top,
+        left: clientRect.left - paperRect.left,
+        width: clientRect.width,
+        height: clientRect.height,
+      })
+    }
+  }
+
+  return rects
+}
+
+function getAnchorTop(range: Pick<SelectionRange, 'startLineId' | 'endLineId' | 'startOffset' | 'endOffset'>, lines: ScriptLine[], lineOrder: Map<string, number>): number {
+  const rects = getRangeRects(range, lines, lineOrder)
+  if (rects.length === 0) return 24
+  return Math.min(...rects.map(rect => rect.top))
+}
+
+function alphaColor(color: string, alpha: number): string {
+  if (!color.startsWith('#') || (color.length !== 7 && color.length !== 4)) return color
+  const hex = color.length === 4
+    ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`
+    : color
+  const red = parseInt(hex.slice(1, 3), 16)
+  const green = parseInt(hex.slice(3, 5), 16)
+  const blue = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
+}
+
+function summarizeReactions(reactions: ScriptComment['reactions']) {
+  const counts = new Map<string, number>()
+  for (const reaction of reactions) {
+    counts.set(reaction.emoji, (counts.get(reaction.emoji) ?? 0) + 1)
+  }
+  return Array.from(counts.entries()).map(([emoji, count]) => ({ emoji, count }))
+}
+
+const highlightRectStyle: React.CSSProperties = {
+  position: 'absolute',
+  borderRadius: 3,
+  pointerEvents: 'none',
+  zIndex: 6,
+}
+
+const threadCardStyle: React.CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  width: THREAD_WIDTH,
+  background: '#17171c',
+  border: '1px solid #2a2a30',
+  borderRadius: 12,
+  padding: '0.62rem',
+  boxShadow: '0 14px 28px rgba(0,0,0,0.2)',
+  zIndex: 14,
+}
+
+const threadHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: '0.4rem',
+  alignItems: 'flex-start',
+  marginBottom: '0.42rem',
+}
+
+const threadTitleStyle: React.CSSProperties = {
+  color: '#e8e6de',
+  fontSize: '0.76rem',
+  fontWeight: 700,
+}
+
+const threadQuoteStyle: React.CSSProperties = {
+  color: '#e8b86d',
+  fontSize: '0.64rem',
+  lineHeight: 1.28,
+  marginBottom: '0.32rem',
+}
+
+const threadBodyStyle: React.CSSProperties = {
+  color: '#e8e6de',
+  fontSize: '0.71rem',
+  lineHeight: 1.35,
+}
+
+const threadSmallBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: '1px solid #2a2a30',
+  borderRadius: 999,
+  padding: '0.16rem 0.46rem',
+  color: '#8f8d86',
+  fontSize: '0.62rem',
+  cursor: 'pointer',
+  flexShrink: 0,
+}
+
+const threadPrimaryBtnStyle: React.CSSProperties = {
+  background: '#e8b86d',
+  border: 'none',
+  borderRadius: 999,
+  padding: '0.22rem 0.52rem',
+  color: '#0f0f11',
+  fontSize: '0.64rem',
+  cursor: 'pointer',
+  fontWeight: 700,
+  flexShrink: 0,
+}
+
+const threadTextareaStyle: React.CSSProperties = {
+  width: '100%',
+  minHeight: 76,
+  resize: 'vertical',
+  background: '#0f0f11',
+  border: '1px solid #2a2a30',
+  borderRadius: 9,
+  color: '#e8e6de',
+  padding: '0.5rem 0.62rem',
+  fontSize: '0.71rem',
+  outline: 'none',
+  fontFamily: 'Syne, sans-serif',
+  marginBottom: '0.55rem',
+}
+
+const commentIconStyle: React.CSSProperties = {
+  position: 'absolute',
+  right: 0,
+  width: 24,
+  height: 24,
+  borderRadius: 999,
+  border: '1px solid #e8b86d',
+  background: '#17171c',
+  color: '#e8b86d',
+  fontWeight: 700,
+  fontSize: '0.9rem',
+  cursor: 'pointer',
+  zIndex: 15,
+}
+
+const resolveBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: '1px solid #2a2a30',
+  borderRadius: 999,
+  width: 22,
+  height: 22,
+  cursor: 'pointer',
+  fontWeight: 700,
+  flexShrink: 0,
+}
+
+const replyRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: '0.35rem',
+}
+
+const reactionBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: '1px solid #2a2a30',
+  borderRadius: 999,
+  padding: '0.12rem 0.34rem',
+  fontSize: '0.64rem',
+  cursor: 'pointer',
+}
+
+const replyInputStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  background: '#0f0f11',
+  border: '1px solid #2a2a30',
+  borderRadius: 999,
+  padding: '0.26rem 0.5rem',
+  color: '#e8e6de',
+  fontSize: '0.66rem',
+  outline: 'none',
 }

@@ -1,43 +1,57 @@
 import type { ScriptLine } from '../editor/types'
 import { LINE_STYLES } from '../editor/lineStyles'
+import { formatDisplayDate, type ExportMetadata } from './types'
 
-// Helper: estimate lines of text (12pt Courier Prime, ~62 chars per line at screenplay width)
 const CHARS_PER_LINE = 62
+const SCREENPLAY_LINES_PER_PAGE = 53
 
-function splitDialogueForMoreContd(
-  lines: ScriptLine[]
-): ScriptLine[] {
+const CHARS_PER_TYPE: Partial<Record<ScriptLine['type'], number>> = {
+  CHARACTER: 32,
+  PARENTHETICAL: 28,
+  DIALOGUE: 36,
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function splitDialogueForMoreContd(lines: ScriptLine[]): ScriptLine[] {
   const result: ScriptLine[] = []
   let i = 0
+
   while (i < lines.length) {
     const line = lines[i]
-    // Look for CHARACTER followed by dialogue block
+
     if (line.type === 'CHARACTER') {
       const charName = line.text.trim().toUpperCase()
       result.push(line)
       i++
-      // Collect the dialogue block
+
       const block: ScriptLine[] = []
       while (i < lines.length && (lines[i].type === 'DIALOGUE' || lines[i].type === 'PARENTHETICAL')) {
         block.push(lines[i])
         i++
       }
-      // Estimate total lines in block
+
       let totalLines = 0
-      for (const bl of block) {
-        totalLines += Math.ceil(bl.text.length / CHARS_PER_LINE) + 1
+      for (const blockLine of block) {
+        totalLines += Math.ceil(blockLine.text.length / CHARS_PER_LINE) + 1
       }
-      // If block is long enough to potentially span a page (> 10 lines), insert MORE/CONT'D
+
       if (totalLines > 10) {
-        // Split at midpoint by finding a DIALOGUE line near middle
         let lineCount = 0
         let splitAt = -1
+
         for (let j = 0; j < block.length; j++) {
           lineCount += Math.ceil(block[j].text.length / CHARS_PER_LINE) + 1
           if (lineCount > totalLines / 2 && block[j].type === 'DIALOGUE' && splitAt === -1) {
             splitAt = j
           }
         }
+
         if (splitAt > 0 && splitAt < block.length - 1) {
           for (let j = 0; j <= splitAt; j++) result.push(block[j])
           result.push({ id: `more-${line.id}`, type: 'PARENTHETICAL', text: '(MORE)' })
@@ -54,50 +68,227 @@ function splitDialogueForMoreContd(
       i++
     }
   }
+
   return result
 }
 
-export function buildPDFHtml(title: string, lines: ScriptLine[]): string {
-  const processedLines = splitDialogueForMoreContd(lines)
-  const paragraphs = processedLines.map(l => {
-    const s = LINE_STYLES[l.type]
+function buildParagraphs(lines: ScriptLine[]): string {
+  return splitDialogueForMoreContd(lines).map(line => {
+    const style = LINE_STYLES[line.type]
     const styles = [
-      s.fontWeight ? `font-weight:${s.fontWeight}` : '',
-      s.textTransform ? `text-transform:${s.textTransform}` : '',
-      s.fontStyle ? `font-style:${s.fontStyle}` : '',
-      s.marginLeft ? `margin-left:${s.marginLeft}` : '',
-      s.marginRight ? `margin-right:${s.marginRight}` : '',
-      s.textAlign ? `text-align:${s.textAlign}` : '',
+      style.fontWeight ? `font-weight:${style.fontWeight}` : '',
+      style.textTransform ? `text-transform:${style.textTransform}` : '',
+      style.fontStyle ? `font-style:${style.fontStyle}` : '',
+      style.marginLeft ? `margin-left:${style.marginLeft}` : '',
+      style.marginRight ? `margin-right:${style.marginRight}` : '',
+      style.textAlign ? `text-align:${style.textAlign}` : '',
     ].filter(Boolean).join(';')
 
-    const text = l.text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-
-    return `<p class="line" style="${styles}">${text || '&nbsp;'}</p>`
+    return `<p class="line" style="${styles}">${escapeHtml(line.text) || '&nbsp;'}</p>`
   }).join('\n')
+}
 
+function getEstimatedRenderedLines(line: ScriptLine): number {
+  const charsPerLine = CHARS_PER_TYPE[line.type] ?? CHARS_PER_LINE
+  const text = line.text.trim()
+  if (!text) return 1
+
+  return Math.max(1, Math.ceil(text.length / charsPerLine))
+}
+
+function buildPageParagraph(line: ScriptLine): string {
+  const style = LINE_STYLES[line.type]
+  const styles = [
+    style.fontWeight ? `font-weight:${style.fontWeight}` : '',
+    style.textTransform ? `text-transform:${style.textTransform}` : '',
+    style.fontStyle ? `font-style:${style.fontStyle}` : '',
+    style.marginLeft ? `margin-left:${style.marginLeft}` : '',
+    style.marginRight ? `margin-right:${style.marginRight}` : '',
+    style.textAlign ? `text-align:${style.textAlign}` : '',
+  ].filter(Boolean).join(';')
+
+  return `<p class="line" style="${styles}">${escapeHtml(line.text) || '&nbsp;'}</p>`
+}
+
+function paginateScreenplay(lines: ScriptLine[]): ScriptLine[][] {
+  const processedLines = splitDialogueForMoreContd(lines)
+  const pages: ScriptLine[][] = []
+  let currentPage: ScriptLine[] = []
+  let usedLines = 0
+
+  for (const line of processedLines) {
+    const lineHeight = getEstimatedRenderedLines(line)
+    const shouldBreak = currentPage.length > 0 && usedLines + lineHeight > SCREENPLAY_LINES_PER_PAGE
+
+    if (shouldBreak) {
+      pages.push(currentPage)
+      currentPage = []
+      usedLines = 0
+    }
+
+    currentPage.push(line)
+    usedLines += lineHeight
+  }
+
+  if (currentPage.length > 0 || pages.length === 0) {
+    pages.push(currentPage)
+  }
+
+  return pages
+}
+
+function buildScreenplayPages(lines: ScriptLine[]): string {
+  return paginateScreenplay(lines).map((pageLines, index) => {
+    const pageNumber = index + 1
+
+    return `<section class="screenplay-page">
+  <div class="page-number">${pageNumber}.</div>
+  <div class="page-content">
+${pageLines.map(buildPageParagraph).join('\n')}
+  </div>
+</section>`
+  }).join('\n')
+}
+
+const baseStyles = `
+  html, body { margin: 0; padding: 0; }
+  body { font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 12pt; line-height: 1.5; }
+  .line { margin: 0; min-height: 1.5em; white-space: pre-wrap; overflow-wrap: break-word; }
+`
+
+export function buildPDFTitlePageHtml(metadata: ExportMetadata): string {
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <style>
   @page { margin: 1in 1in 1in 1.5in; size: letter; }
-  body { font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 12pt; line-height: 1.5; }
-  .title-page { page-break-after: always; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 9in; }
-  .title-page h1 { font-size: 14pt; font-weight: bold; text-transform: uppercase; }
-  .line { margin: 0; min-height: 1.5em; }
-  @page :right { @top-right { content: counter(page) '.'; font-family: 'Courier Prime', monospace; font-size: 12pt; } }
+  ${baseStyles}
+  .title-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 9in;
+    text-align: center;
+  }
+  .title-page h1 {
+    margin: 0 0 3em;
+    font-size: 14pt;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  .title-page p { margin: 0; }
+  .title-page .date { margin-top: 3em; }
 </style>
 </head>
 <body>
 <div class="title-page">
-  <h1>${title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</h1>
+  <h1>${escapeHtml(metadata.title)}</h1>
   <p>Written by</p>
-  <p>${new Date().toLocaleDateString()}</p>
+  <p>${escapeHtml(metadata.writtenBy)}</p>
+  <p class="date">${escapeHtml(formatDisplayDate(metadata.date))}</p>
 </div>
-${paragraphs}
+</body>
+</html>`
+}
+
+export function buildPDFScreenplayHtml(lines: ScriptLine[]): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {
+    margin: 1in 1in 1in 1.5in;
+    size: letter;
+  }
+  ${baseStyles}
+  .screenplay-page {
+    position: relative;
+    box-sizing: border-box;
+    width: 8.5in;
+    height: 11in;
+    padding: 1in 1in 1in 1.5in;
+    break-after: page;
+    page-break-after: always;
+  }
+  .screenplay-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  .page-number {
+    position: absolute;
+    top: 0.45in;
+    left: 1.5in;
+  }
+</style>
+</head>
+<body>
+${buildScreenplayPages(lines)}
+</body>
+</html>`
+}
+
+export function buildPDFDocumentHtml(metadata: ExportMetadata, lines: ScriptLine[]): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {
+    margin: 1in 1in 1in 1.5in;
+    size: letter;
+  }
+  ${baseStyles}
+  .title-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 9in;
+    text-align: center;
+    break-after: page;
+    page-break-after: always;
+  }
+  .title-page h1 {
+    margin: 0 0 3em;
+    font-size: 14pt;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  .title-page p { margin: 0; }
+  .title-page .date { margin-top: 3em; }
+  .screenplay-page {
+    position: relative;
+    box-sizing: border-box;
+    width: 8.5in;
+    height: 11in;
+    padding: 1in 1in 1in 1.5in;
+    break-after: page;
+    page-break-after: always;
+  }
+  .screenplay-page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  .page-number {
+    position: absolute;
+    top: 0.45in;
+    left: 1.5in;
+  }
+</style>
+</head>
+<body>
+<section class="title-page">
+  <h1>${escapeHtml(metadata.title)}</h1>
+  <p>Written by</p>
+  <p>${escapeHtml(metadata.writtenBy)}</p>
+  <p class="date">${escapeHtml(formatDisplayDate(metadata.date))}</p>
+</section>
+${buildScreenplayPages(lines)}
 </body>
 </html>`
 }

@@ -14,6 +14,58 @@ export interface ScriptLine {
   text: string
 }
 
+export interface SelectionRange {
+  startLineId: string
+  endLineId: string
+  startOffset: number
+  endOffset: number
+  text: string
+}
+
+export interface ScriptComment {
+  id: string
+  body: string
+  quotedText: string
+  startLineId: string
+  endLineId: string
+  startOffset: number
+  endOffset: number
+  createdAt: string
+  resolvedAt?: string | null
+  resolvedBy?: {
+    id: string
+    name?: string | null
+    email?: string | null
+    displayName?: string | null
+  } | null
+  author: {
+    id: string
+    name?: string | null
+    image?: string | null
+    displayName?: string | null
+    profileImage?: string | null
+    email?: string | null
+  }
+  replies: {
+    id: string
+    body: string
+    createdAt: string
+    author: {
+      id: string
+      name?: string | null
+      image?: string | null
+      displayName?: string | null
+      profileImage?: string | null
+      email?: string | null
+    }
+  }[]
+  reactions: {
+    id: string
+    emoji: string
+    userId: string
+  }[]
+}
+
 export const ELEMENT_CYCLE: ElementType[] = [
   'ACTION', 'CHARACTER', 'DIALOGUE', 'PARENTHETICAL', 'TRANSITION', 'SCENE_HEADING', 'SHOT',
 ]

@@ -7,18 +7,35 @@ datasource db {
 }
 
 model User {
-  id           String               @id @default(cuid())
-  email        String               @unique
-  name         String?
-  image        String?
-  createdAt    DateTime             @default(now())
+  id             String               @id @default(cuid())
+  email          String               @unique
+  emailVerified  DateTime?
+  name           String?
+  image          String?
+  displayName    String?
+  profileImage   String?
+  createdAt      DateTime             @default(now())
   scripts      ScriptCollaborator[]
   messages     Message[]
   stats        WritingStats[]
   ownedScripts Script[]             @relation("owner")
   revisions    Revision[]           @relation("author")
+  comments     ScriptComment[]      @relation("commentAuthor")
+  resolvedComments ScriptComment[]  @relation("commentResolver")
+  commentReplies ScriptCommentReply[] @relation("commentReplyAuthor")
+  commentReactions ScriptCommentReaction[]
   accounts     Account[]
   sessions     Session[]
+  sentInvites  Invite[]             @relation("inviter")
+}
+
+model Invite {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  invitedById String
+  invitedBy   User     @relation("inviter", fields: [invitedById], references: [id])
+  createdAt   DateTime @default(now())
+  usedAt      DateTime?
 }
 
 model Account {
@@ -67,6 +84,47 @@ model Script {
   revisions     Revision[]
   messages      Message[]
   characters    Character[]
+  comments      ScriptComment[]
+}
+
+model ScriptComment {
+  id          String   @id @default(cuid())
+  body        String
+  quotedText  String
+  startLineId String
+  endLineId   String
+  startOffset Int
+  endOffset   Int
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+  resolvedById String?
+  scriptId    String
+  authorId    String
+  script      Script   @relation(fields: [scriptId], references: [id])
+  author      User     @relation("commentAuthor", fields: [authorId], references: [id])
+  resolvedBy  User?    @relation("commentResolver", fields: [resolvedById], references: [id])
+  replies     ScriptCommentReply[]
+  reactions   ScriptCommentReaction[]
+}
+
+model ScriptCommentReply {
+  id         String   @id @default(cuid())
+  body       String
+  createdAt  DateTime @default(now())
+  commentId  String
+  authorId   String
+  comment    ScriptComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  author     User     @relation("commentReplyAuthor", fields: [authorId], references: [id])
+}
+
+model ScriptCommentReaction {
+  id         String   @id @default(cuid())
+  emoji      String
+  commentId  String
+  userId     String
+  comment    ScriptComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id])
+  @@unique([commentId, userId, emoji])
 }
 
 model ScriptCollaborator {

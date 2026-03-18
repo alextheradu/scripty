@@ -1,18 +1,28 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { prisma } from './db'
+import { addDays, getDateKey } from './dates'
 
 export function countWords(contentJson: string): number {
   const lines: any[] = JSON.parse(contentJson || '[]')
   return lines.reduce((acc, l) => acc + (l.text?.split(/\s+/).filter(Boolean).length ?? 0), 0)
 }
 
-export async function updateWritingStats(userId: string, contentJson: string) {
+export async function updateWritingStats(userId: string, contentJson: string, timeZone?: string) {
   const words = countWords(contentJson)
-  const today = new Date().toISOString().slice(0, 10)
-  await prisma.writingStats.upsert({
-    where: { userId_date: { userId, date: today } },
-    update: { words },
-    create: { userId, date: today, words },
+  const today = getDateKey(new Date(), timeZone)
+  const tomorrow = addDays(today, 1)
+
+  await prisma.$transaction(async tx => {
+    await tx.writingStats.upsert({
+      where: { userId_date: { userId, date: today } },
+      update: { words },
+      create: { userId, date: today, words },
+    })
+
+    // Clean up the bogus "tomorrow" entry created by the old UTC-based logic.
+    await tx.writingStats.deleteMany({
+      where: { userId, date: tomorrow },
+    })
   })
 }
 

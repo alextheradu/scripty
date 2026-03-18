@@ -1,3 +1,5 @@
+import { dateKeyToLocalDate } from '@/lib/dates'
+
 interface WordsChartProps {
   dailyStats: { date: string; words: number }[]
 }
@@ -10,7 +12,7 @@ export function WordsChart({ dailyStats }: WordsChartProps) {
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 80 }}>
       {last30.map(d => {
         const height = Math.max(2, (d.words / max) * 80)
-        const label = new Date(d.date).toLocaleDateString([], { month: 'short', day: 'numeric' })
+        const label = dateKeyToLocalDate(d.date).toLocaleDateString([], { month: 'short', day: 'numeric' })
         return (
           <div key={d.date} title={`${label}: ${d.words} words`} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
             <div style={{

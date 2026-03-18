@@ -6,15 +6,19 @@ import { ELEMENT_CYCLE } from '@/lib/editor/types'
 interface ToolbarProps {
   activeType: ElementType
   onChangeType: (type: ElementType) => void
+  commentsCount?: number
+  commentsOpen?: boolean
+  onToggleComments?: () => void
 }
 
-export function Toolbar({ activeType, onChangeType }: ToolbarProps) {
+export function Toolbar({ activeType, onChangeType, commentsCount = 0, commentsOpen = false, onToggleComments }: ToolbarProps) {
   return (
     <div style={{
       position: 'sticky', top: 0, zIndex: 10,
       background: '#1a1a1f', borderBottom: '1px solid #2a2a30',
-      padding: '0 1rem', display: 'flex', gap: '0.25rem',
-      alignItems: 'center', height: 40,
+      padding: '0 0.75rem', display: 'flex', gap: '0.2rem',
+      alignItems: 'center', height: 34,
+      overflowX: 'auto',
     }}>
       {ELEMENT_CYCLE.map(type => {
         const isActive = type === activeType
@@ -26,9 +30,9 @@ export function Toolbar({ activeType, onChangeType }: ToolbarProps) {
             style={{
               background: isActive ? '#e8b86d22' : 'none',
               border: `1px solid ${isActive ? '#e8b86d' : 'transparent'}`,
-              borderRadius: 4, padding: '0.2rem 0.625rem',
+              borderRadius: 999, padding: '0.12rem 0.5rem',
               color: isActive ? '#e8b86d' : '#6b6a64',
-              fontFamily: 'Syne, sans-serif', fontSize: '0.75rem',
+              fontFamily: 'Syne, sans-serif', fontSize: '0.7rem',
               cursor: 'pointer', transition: 'all 150ms', whiteSpace: 'nowrap',
             }}
             onMouseEnter={e => {
@@ -48,6 +52,26 @@ export function Toolbar({ activeType, onChangeType }: ToolbarProps) {
           </button>
         )
       })}
+      {onToggleComments && (
+        <button
+          onClick={onToggleComments}
+          style={{
+            marginLeft: 'auto',
+            background: commentsOpen ? '#e8b86d22' : 'none',
+            border: `1px solid ${commentsOpen ? '#e8b86d' : '#2a2a30'}`,
+            borderRadius: 999,
+            padding: '0.12rem 0.55rem',
+            color: commentsOpen ? '#e8b86d' : '#8f8d86',
+            fontFamily: 'Syne, sans-serif',
+            fontSize: '0.7rem',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          Comments{commentsCount ? ` ${commentsCount}` : ''}
+        </button>
+      )}
     </div>
   )
 }

@@ -32,18 +32,19 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
   const [activeType, setActiveType] = useState<ScriptLine['type']>('ACTION')
   const [streak, setStreak] = useState(0)
   const socket = getSocket()
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   useEffect(() => {
     socket.emit('script:join', { scriptId, user: { id: userId, name: userName, image: userImage } })
     const handlePresence = (users: { id: string; name: string; image?: string; color: string; socketId?: string }[]) =>
       setOnlineUsers(users.filter(u => u.id !== userId))
     socket.on('presence:update', handlePresence)
-    fetch('/api/stats').then(r => r.json()).then(d => setStreak(d.currentStreak ?? 0)).catch(() => {})
+    fetch('/api/stats', { headers: { 'x-timezone': timeZone } }).then(r => r.json()).then(d => setStreak(d.currentStreak ?? 0)).catch(() => {})
     return () => {
       socket.emit('script:leave', { scriptId })
       socket.off('presence:update', handlePresence)
     }
-  }, [scriptId, userId, userName, userImage, socket])
+  }, [scriptId, userId, userName, userImage, socket, timeZone])
 
   async function handleTitleChange(t: string) {
     setTitle(t)
@@ -111,7 +112,7 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
         </button>
       </div>
 
-      <div style={{ height: 28, background: '#1a1a1f', borderTop: '1px solid #2a2a30', display: 'flex', alignItems: 'center', padding: '0 1rem', gap: '1.5rem', fontSize: '0.75rem', color: '#6b6a64', fontFamily: 'Syne, sans-serif' }}>
+      <div style={{ height: 24, background: '#1a1a1f', borderTop: '1px solid #2a2a30', display: 'flex', alignItems: 'center', padding: '0 0.8rem', gap: '1rem', fontSize: '0.69rem', color: '#6b6a64', fontFamily: 'Syne, sans-serif' }}>
         <span>{wordCount.toLocaleString()} words</span>
         <span>{pageCount} pages</span>
         <span>{ELEMENT_LABELS[activeType]}</span>
@@ -123,8 +124,21 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
         onClose={() => setPomodoroOpen(false)}
         onBroadcast={msg => socket.emit('chat:send', { scriptId, text: `⏱ ${msg}` })}
       />
-      <ExportModal scriptId={scriptId} scriptTitle={title} open={exportOpen} onClose={() => setExportOpen(false)} />
-      <ShareModal scriptId={scriptId} shareToken={initShare ?? null} open={shareOpen} onClose={() => setShareOpen(false)} isAdmin={!!isAdmin} />
+      <ExportModal
+        scriptId={scriptId}
+        scriptTitle={title}
+        defaultWrittenBy={userName}
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+      />
+      <ShareModal
+        scriptId={scriptId}
+        scriptTitle={title}
+        shareToken={initShare ?? null}
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        isAdmin={!!isAdmin}
+      />
     </div>
   )
 }

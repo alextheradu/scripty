@@ -1,3 +1,5 @@
+import { dateKeyToLocalDate, getDateKey } from '@/lib/dates'
+
 interface ContributionGraphProps {
   dailyStats: { date: string; words: number }[]
 }
@@ -20,12 +22,12 @@ export function ContributionGraph({ dailyStats }: ContributionGraphProps) {
   const days: { date: string; words: number }[] = []
   for (let i = 90; i >= 0; i--) {
     const d = new Date(today.getTime() - i * 86400000)
-    const date = d.toISOString().slice(0, 10)
+    const date = getDateKey(d)
     days.push({ date, words: statMap.get(date) ?? 0 })
   }
 
   // Pad to full weeks
-  const startDow = new Date(days[0].date).getDay()
+  const startDow = dateKeyToLocalDate(days[0].date).getDay()
   const padded = [...Array(startDow).fill(null), ...days]
   const weeks: (typeof days[0] | null)[][] = []
   for (let i = 0; i < padded.length; i += 7) weeks.push(padded.slice(i, i + 7))

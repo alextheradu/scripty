@@ -1,7 +1,8 @@
 import type { ScriptLine } from '../editor/types'
+import { formatDisplayDate, type ExportMetadata } from './types'
 
-export function toFountain(title: string, lines: ScriptLine[]): string {
-  const header = `Title: ${title}\nCredit: Written by\nDate: ${new Date().toLocaleDateString()}\n\n===\n\n`
+export function toFountain(metadata: ExportMetadata, lines: ScriptLine[]): string {
+  const header = `Title: ${metadata.title}\nCredit: Written by\nAuthor: ${metadata.writtenBy}\nDate: ${formatDisplayDate(metadata.date)}\n\n===\n\n`
 
   const body = lines.map(l => {
     const t = l.text.trim()

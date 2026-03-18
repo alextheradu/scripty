@@ -1,8 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { useSession } from 'next-auth/react'
-import Link from 'next/link'
-import { Avatar } from './Avatar'
+import { AppNav } from './AppNav'
 
 interface HeaderProps {
   scriptId: string
@@ -17,7 +15,6 @@ interface HeaderProps {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function Header({ scriptId: _scriptId, title, saveStatus, streakCount, onTitleChange, onExport, onShare, onPomodoro }: HeaderProps) {
-  const { data: session } = useSession()
   const [editing, setEditing] = useState(false)
   const [localTitle, setLocalTitle] = useState(title)
 
@@ -31,52 +28,85 @@ export function Header({ scriptId: _scriptId, title, saveStatus, streakCount, on
 
   return (
     <header style={{
-      height: 52, background: '#1a1a1f', borderBottom: '1px solid #2a2a30',
-      display: 'flex', alignItems: 'center', padding: '0 1rem', gap: '0.75rem',
+      background: '#1a1a1f',
+      borderBottom: '1px solid #2a2a30',
     }}>
-      <Link href="/" style={{ color: '#e8b86d', fontFamily: '"Playfair Display", serif', fontSize: '1.25rem', textDecoration: 'none', flexShrink: 0 }}>
-        S
-      </Link>
-      <div style={{ width: 1, height: 20, background: '#2a2a30', flexShrink: 0 }} />
-
-      {editing ? (
-        <input
-          value={localTitle}
-          onChange={e => setLocalTitle(e.target.value)}
-          onBlur={commitTitle}
-          onKeyDown={e => e.key === 'Enter' && commitTitle()}
-          autoFocus
-          style={{
-            background: 'none', border: 'none', borderBottom: '1px solid #e8b86d',
-            color: '#e8e6de', fontFamily: '"Playfair Display", serif',
-            fontSize: '1rem', outline: 'none', padding: '2px 4px', width: 280,
-          }}
-        />
-      ) : (
-        <span
-          onClick={() => setEditing(true)}
-          style={{ fontFamily: '"Playfair Display", serif', fontSize: '1rem', color: '#e8e6de', cursor: 'text', padding: '2px 4px' }}
-        >
-          {title}
-        </span>
-      )}
-
-      <span style={{ fontSize: '0.75rem', color: statusColor, marginLeft: '0.25rem' }}>{statusText}</span>
-      <div style={{ flex: 1 }} />
-
-      {!!streakCount && <span style={{ fontSize: '0.875rem', color: '#e8b86d' }}>🔥 {streakCount}</span>}
-
-      <button onClick={onExport} style={btnStyle}>Export</button>
-      <button onClick={onShare} style={btnStyle}>Share</button>
-      <button onClick={onPomodoro} style={btnStyle}>⏱</button>
-
-      {session?.user && <Avatar src={session.user.image} name={session.user.name ?? '?'} size={28} />}
+      <AppNav
+        actions={
+          <>
+            {editing ? (
+              <input
+                value={localTitle}
+                onChange={e => setLocalTitle(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={e => e.key === 'Enter' && commitTitle()}
+                autoFocus
+                style={titleInputStyle}
+              />
+            ) : (
+              <button onClick={() => setEditing(true)} style={titleButtonStyle} title="Rename script">
+                {title}
+              </button>
+            )}
+            <span style={{ ...statusPillStyle, color: statusColor }}>{statusText}</span>
+            {!!streakCount && <span style={streakPillStyle}>🔥 {streakCount} day streak</span>}
+            <button onClick={onExport} style={btnStyle}>Export</button>
+            <button onClick={onShare} style={btnStyle}>Share</button>
+            <button onClick={onPomodoro} style={btnStyle}>Focus</button>
+          </>
+        }
+      />
     </header>
   )
 }
 
 const btnStyle: React.CSSProperties = {
-  background: 'none', border: '1px solid #2a2a30', borderRadius: 4,
-  padding: '0.25rem 0.625rem', color: '#e8e6de',
-  fontFamily: 'Syne, sans-serif', fontSize: '0.8125rem', cursor: 'pointer',
+  background: '#1a1a1f', border: '1px solid #2a2a30', borderRadius: 999,
+  padding: '0.24rem 0.58rem', color: '#e8e6de',
+  fontFamily: 'Syne, sans-serif', fontSize: '0.76rem', cursor: 'pointer',
+}
+
+const statusPillStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '0.32rem 0.7rem',
+  borderRadius: 999,
+  border: '1px solid #2a2a30',
+  background: '#17171c',
+  fontSize: '0.72rem',
+  fontWeight: 600,
+}
+
+const streakPillStyle: React.CSSProperties = {
+  ...statusPillStyle,
+  color: '#e8b86d',
+}
+
+const titleInputStyle: React.CSSProperties = {
+  background: '#111116',
+  border: '1px solid #2a2a30',
+  borderRadius: 999,
+  color: '#e8e6de',
+  fontFamily: '"Playfair Display", serif',
+  fontSize: '0.95rem',
+  outline: 'none',
+  padding: '0.38rem 0.8rem',
+  width: 'min(26vw, 300px)',
+  minWidth: 160,
+}
+
+const titleButtonStyle: React.CSSProperties = {
+  background: '#111116',
+  border: '1px solid #2a2a30',
+  borderRadius: 999,
+  padding: '0.34rem 0.8rem',
+  color: '#e8e6de',
+  cursor: 'text',
+  textAlign: 'left',
+  fontFamily: '"Playfair Display", serif',
+  fontSize: '0.92rem',
+  maxWidth: 260,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 }

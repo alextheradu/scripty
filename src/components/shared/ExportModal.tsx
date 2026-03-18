@@ -1,8 +1,10 @@
 'use client'
+import { useEffect, useState } from 'react'
 
 interface ExportModalProps {
   scriptId: string
   scriptTitle: string
+  defaultWrittenBy: string
   open: boolean
   onClose: () => void
 }
@@ -14,11 +16,45 @@ const FORMATS = [
   { id: 'txt',      label: 'Plain Text',  desc: 'Readable text with screenplay spacing (.txt)' },
 ]
 
-export function ExportModal({ scriptId, scriptTitle, open, onClose }: ExportModalProps) {
+function getTodayValue() {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = `${today.getMonth() + 1}`.padStart(2, '0')
+  const day = `${today.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+export function ExportModal({ scriptId, scriptTitle, defaultWrittenBy, open, onClose }: ExportModalProps) {
+  const [title, setTitle] = useState(scriptTitle)
+  const [writtenBy, setWrittenBy] = useState(defaultWrittenBy)
+  const [date, setDate] = useState(getTodayValue())
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    setTitle(scriptTitle)
+    setWrittenBy(defaultWrittenBy)
+    setDate(getTodayValue())
+    setError('')
+  }, [defaultWrittenBy, open, scriptTitle])
+
   if (!open) return null
 
   function download(format: string) {
-    window.open(`/api/scripts/${scriptId}/export?format=${format}`, '_blank')
+    if (!title.trim() || !writtenBy.trim() || !date) {
+      setError('Enter the title, writer name, and draft date before exporting.')
+      return
+    }
+
+    const params = new URLSearchParams({
+      format,
+      title: title.trim(),
+      writtenBy: writtenBy.trim(),
+      date,
+    })
+
+    window.open(`/api/scripts/${scriptId}/export?${params.toString()}`, '_blank')
+    onClose()
   }
 
   return (
@@ -28,6 +64,46 @@ export function ExportModal({ scriptId, scriptTitle, open, onClose }: ExportModa
         <h2 style={{ fontFamily: '"Playfair Display", serif', fontSize: '1.25rem', marginBottom: '1.25rem', color: '#e8e6de' }}>
           Export &ldquo;{scriptTitle}&rdquo;
         </h2>
+
+        <div style={{ display: 'grid', gap: '0.875rem', marginBottom: '1.25rem' }}>
+          <div>
+            <label style={labelStyle}>Script title</label>
+            <input
+              value={title}
+              onChange={e => { setTitle(e.target.value); setError('') }}
+              placeholder="Untitled Script"
+              maxLength={120}
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Written by</label>
+            <input
+              value={writtenBy}
+              onChange={e => { setWrittenBy(e.target.value); setError('') }}
+              placeholder="Writer name"
+              maxLength={120}
+              style={inputStyle}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Draft date</label>
+            <input
+              type="date"
+              value={date}
+              onChange={e => { setDate(e.target.value); setError('') }}
+              style={inputStyle}
+            />
+          </div>
+        </div>
+
+        {error && (
+          <p style={{ margin: '0 0 1rem', color: '#e05e5e', fontFamily: 'Syne, sans-serif', fontSize: '0.8125rem' }}>
+            {error}
+          </p>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
           {FORMATS.map(f => (
@@ -56,4 +132,27 @@ export function ExportModal({ scriptId, scriptTitle, open, onClose }: ExportModa
       </div>
     </div>
   )
+}
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  color: '#6b6a64',
+  fontSize: '0.75rem',
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  marginBottom: '0.375rem',
+  fontFamily: 'Syne, sans-serif',
+}
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  background: '#0f0f11',
+  border: '1px solid #2a2a30',
+  borderRadius: 6,
+  padding: '0.5rem 0.75rem',
+  color: '#e8e6de',
+  fontFamily: 'Syne, sans-serif',
+  fontSize: '0.9375rem',
+  outline: 'none',
 }
