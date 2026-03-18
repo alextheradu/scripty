@@ -83,7 +83,10 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
   const characters = lines.filter(l => l.type === 'CHARACTER').map(l => l.text.toUpperCase()).filter(Boolean)
   const lineOrder = useMemo(() => new Map(lines.map((line, index) => [line.id, index])), [lines])
   const estimatedLayout = useMemo(() => getEstimatedPageLayout(lines), [lines])
-  const breakBeforeLineIds = useMemo(() => new Set(estimatedLayout.breakBeforeLineIds), [estimatedLayout.breakBeforeLineIds])
+  const pageBreaks = useMemo(
+    () => Array.from({ length: Math.max(estimatedLayout.pageCount - 1, 0) }, (_, index) => index + 2),
+    [estimatedLayout.pageCount]
+  )
 
   const scheduleSave = useCallback((nextLines: ScriptLine[]) => {
     clearTimeout(saveTimer.current)
@@ -701,13 +704,21 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
               style={{
                 background: '#fffef7',
                 width: SCREENPLAY_PAGE_WIDTH,
-                minHeight: SCREENPLAY_PAGE_HEIGHT,
+                minHeight: `calc(${estimatedLayout.pageCount} * ${SCREENPLAY_PAGE_HEIGHT})`,
                 padding: SCREENPLAY_PAGE_PADDING,
                 boxSizing: 'border-box',
                 boxShadow: '0 0 60px rgba(0,0,0,0.6)',
                 position: 'relative',
               }}
             >
+              {pageBreaks.map(pageNumber => (
+                <PageBreak
+                  key={pageNumber}
+                  pageNumber={pageNumber}
+                  top={`calc(${pageNumber - 1} * ${SCREENPLAY_PAGE_HEIGHT})`}
+                />
+              ))}
+
               {commentOverlays.map(({ key, rect, active }) => (
                 <div
                   key={key}
@@ -736,24 +747,19 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
                 />
               ))}
 
-              {lines.map((line, i) => {
-                const showPageBreak = breakBeforeLineIds.has(line.id)
-                const pageNum = estimatedLayout.pageNumberByLineId[line.id]
-                return (
-                  <div key={line.id}>
-                    {showPageBreak && <PageBreak pageNumber={pageNum} />}
-                    <EditorLine
-                      ref={el => { if (el) lineRefs.current.set(line.id, el); else lineRefs.current.delete(line.id) }}
-                      line={line}
-                      isActive={line.id === activeId}
-                      onChange={readOnly ? () => {} : updateLine}
-                      onKeyDown={readOnly ? () => {} : handleKeyDown}
-                      onClick={id => setActiveId(id)}
-                      readOnly={readOnly}
-                    />
-                  </div>
-                )
-              })}
+              {lines.map(line => (
+                <div key={line.id}>
+                  <EditorLine
+                    ref={el => { if (el) lineRefs.current.set(line.id, el); else lineRefs.current.delete(line.id) }}
+                    line={line}
+                    isActive={line.id === activeId}
+                    onChange={readOnly ? () => {} : updateLine}
+                    onKeyDown={readOnly ? () => {} : handleKeyDown}
+                    onClick={id => setActiveId(id)}
+                    readOnly={readOnly}
+                  />
+                </div>
+              ))}
 
               {remoteCursorOverlays}
             </div>
