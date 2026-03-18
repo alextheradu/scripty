@@ -16,6 +16,7 @@ interface Collaborator {
   id: string
   role: string
   user?: {
+    id?: string
     email?: string
     name?: string
     image?: string
@@ -34,6 +35,7 @@ export function ShareModal({ scriptId, scriptTitle, shareToken: initial, open, o
   const [copyState, setCopyState] = useState<'idle' | 'edit' | 'public'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [loadingPeople, setLoadingPeople] = useState(false)
+  const [pendingCollaboratorId, setPendingCollaboratorId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -96,6 +98,40 @@ export function ShareModal({ scriptId, scriptTitle, shareToken: initial, open, o
       const next = prev.filter(collab => collab.user?.email?.toLowerCase() !== d.collab?.user?.email?.toLowerCase())
       return [...next, d.collab]
     })
+  }
+
+  async function updateCollaboratorRole(collaboratorId: string, role: 'viewer' | 'editor' | 'admin') {
+    setPendingCollaboratorId(collaboratorId)
+    setError(null)
+    const res = await fetch(`/api/scripts/${scriptId}/collaborators`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collaboratorId, role }),
+    })
+    const data = await res.json()
+    setPendingCollaboratorId(null)
+    if (!res.ok) {
+      setError(data.error ?? 'Failed to update collaborator')
+      return
+    }
+
+    setCollaborators(prev => prev.map(collab => collab.id === collaboratorId ? data.collab : collab))
+  }
+
+  async function removeCollaborator(collaboratorId: string) {
+    setPendingCollaboratorId(collaboratorId)
+    setError(null)
+    const res = await fetch(`/api/scripts/${scriptId}/collaborators?collaboratorId=${encodeURIComponent(collaboratorId)}`, {
+      method: 'DELETE',
+    })
+    const data = await res.json()
+    setPendingCollaboratorId(null)
+    if (!res.ok) {
+      setError(data.error ?? 'Failed to remove collaborator')
+      return
+    }
+
+    setCollaborators(prev => prev.filter(collab => collab.id !== collaboratorId))
   }
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
@@ -201,6 +237,8 @@ export function ShareModal({ scriptId, scriptTitle, shareToken: initial, open, o
               {peopleWithAccess.map(person => {
                 const displayName = person.user?.displayName ?? person.user?.name ?? person.user?.email ?? 'Unknown user'
                 const image = person.user?.profileImage ?? person.user?.image
+                const isOwner = person.role === 'owner'
+                const isPending = pendingCollaboratorId === person.id
                 const roleLabel = person.role === 'owner'
                   ? 'Owner'
                   : person.role === 'editor'
@@ -217,12 +255,35 @@ export function ShareModal({ scriptId, scriptTitle, shareToken: initial, open, o
                         <div style={{ color: '#e8e6de', fontSize: '0.84rem', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {displayName}
                         </div>
-                        <div style={{ color: '#6b6a64', fontSize: '0.72rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div style={{ color: '#6b6a64', fontSize: '0.72rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {person.user?.email}
                         </div>
                       </div>
                     </div>
-                    <div style={rolePillStyle}>{roleLabel}</div>
+                    {isAdmin && !isOwner ? (
+                      <select
+                        value={isPending ? '__pending' : person.role}
+                        disabled={isPending}
+                        onChange={e => {
+                          const value = e.target.value
+                          if (value === 'remove') {
+                            void removeCollaborator(person.id)
+                            return
+                          }
+                          if (value === person.role) return
+                          void updateCollaboratorRole(person.id, value as 'viewer' | 'editor' | 'admin')
+                        }}
+                        style={manageSelectStyle}
+                      >
+                        {person.role === 'admin' && <option value="admin">Admin</option>}
+                        <option value="editor">Can edit</option>
+                        <option value="viewer">Can view</option>
+                        <option value="remove">Remove access</option>
+                        {isPending && <option value="__pending">Updating…</option>}
+                      </select>
+                    ) : (
+                      <div style={rolePillStyle}>{roleLabel}</div>
+                    )}
                   </div>
                 )
               })}
@@ -375,4 +436,17 @@ const rolePillStyle: React.CSSProperties = {
   fontSize: '0.72rem',
   fontWeight: 600,
   fontFamily: 'Syne, sans-serif',
+}
+
+const manageSelectStyle: React.CSSProperties = {
+  flexShrink: 0,
+  background: '#0f0f11',
+  border: '1px solid #2a2a30',
+  borderRadius: 999,
+  padding: '0.5rem 0.8rem',
+  color: '#e8e6de',
+  fontFamily: 'Syne, sans-serif',
+  fontSize: '0.74rem',
+  outline: 'none',
+  cursor: 'pointer',
 }
