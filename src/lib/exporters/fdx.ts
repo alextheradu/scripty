@@ -1,4 +1,5 @@
 import type { ScriptLine } from '../editor/types'
+import { getLineSegments } from '../editor/content'
 import { escapeHtml, formatDisplayDate, type ExportMetadata } from './types'
 
 const FDX_TYPES: Record<string, string> = {
@@ -15,8 +16,20 @@ const FDX_TYPES: Record<string, string> = {
 export function toFDX(metadata: ExportMetadata, lines: ScriptLine[]): string {
   const paragraphs = lines.map(l => {
     const fdxType = FDX_TYPES[l.type] ?? 'Action'
-    const text = escapeHtml(l.text)
-    return `    <Paragraph Type="${fdxType}"><Text>${text}</Text></Paragraph>`
+    const textNodes = getLineSegments(l)
+      .map(segment => {
+        const style = [
+          segment.bold ? 'Bold' : '',
+          segment.italic ? 'Italic' : '',
+          segment.underline ? 'Underline' : '',
+        ].filter(Boolean).join('+')
+
+        const styleAttr = style ? ` Style="${style}"` : ''
+        return `<Text${styleAttr}>${escapeHtml(segment.text)}</Text>`
+      })
+      .join('')
+
+    return `    <Paragraph Type="${fdxType}">${textNodes || '<Text></Text>'}</Paragraph>`
   }).join('\n')
 
   const title = escapeHtml(metadata.title)

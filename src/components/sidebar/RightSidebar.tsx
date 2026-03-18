@@ -1,10 +1,11 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { Avatar } from '@/components/shared/Avatar'
+import { parseScriptContent } from '@/lib/editor/content'
 import type { ScriptLine } from '@/lib/editor/types'
 
 function safeParseContent(content: string): ScriptLine[] {
-  try { return JSON.parse(content) as ScriptLine[] } catch { return [] }
+  return parseScriptContent(content)
 }
 
 interface OnlineUser {

@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { prisma } from './db'
 import { addDays, getDateKey } from './dates'
+import { parseScriptContent } from './editor/content'
+import { getEstimatedPageLayout } from './screenplayLayout'
 
 export function countWords(contentJson: string): number {
-  const lines: any[] = JSON.parse(contentJson || '[]')
-  return lines.reduce((acc, l) => acc + (l.text?.split(/\s+/).filter(Boolean).length ?? 0), 0)
+  const lines = parseScriptContent(contentJson)
+  return lines.reduce((acc, line) => acc + line.text.split(/\s+/).filter(Boolean).length, 0)
 }
 
 export async function updateWritingStats(userId: string, contentJson: string, timeZone?: string) {
@@ -42,9 +44,9 @@ export async function getScriptAccess(
 }
 
 export function scriptSummary(s: any) {
-  const lines: any[] = JSON.parse(s.content || '[]')
-  const wordCount = lines.reduce((acc: number, l: any) => acc + (l.text?.split(/\s+/).filter(Boolean).length ?? 0), 0)
-  const pageCount = Math.max(1, Math.ceil(lines.length / 55))
+  const lines = parseScriptContent(s.content)
+  const wordCount = lines.reduce((acc: number, line) => acc + line.text.split(/\s+/).filter(Boolean).length, 0)
+  const pageCount = getEstimatedPageLayout(lines).pageCount
   return {
     id: s.id, title: s.title,
     updatedAt: s.updatedAt, createdAt: s.createdAt,

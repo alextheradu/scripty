@@ -1,13 +1,15 @@
 'use client'
 import { useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
-import type { ScriptLine } from '@/lib/editor/types'
+import { getLineHtml, getLineSegments, normalizeSegments } from '@/lib/editor/content'
+import type { ScriptLine, TextSegment } from '@/lib/editor/types'
 import { LINE_STYLES } from '@/lib/editor/lineStyles'
+import { SCREENPLAY_FONT_SIZE, SCREENPLAY_LINE_HEIGHT } from '@/lib/screenplayLayout'
 
 interface EditorLineProps {
   line: ScriptLine
   isActive: boolean
   collaboratorCursors?: { color: string; name: string; offset: number }[]
-  onChange: (id: string, text: string) => void
+  onChange: (id: string, content: { text: string; segments: TextSegment[] }) => void
   onKeyDown: (e: React.KeyboardEvent, id: string) => void
   onClick: (id: string) => void
   readOnly?: boolean
@@ -29,15 +31,7 @@ export const EditorLine = forwardRef<EditorLineHandle, EditorLineProps>(
         if (!el) return
         el.focus()
         if (offset !== undefined) {
-          const range = document.createRange()
-          const sel = window.getSelection()
-          const text = el.firstChild
-          if (text) {
-            range.setStart(text, Math.min(offset, (text as Text).length))
-            range.collapse(true)
-            sel?.removeAllRanges()
-            sel?.addRange(range)
-          }
+          setCaretOffset(el, offset)
         } else {
           const range = document.createRange()
           const sel = window.getSelection()
@@ -48,34 +42,46 @@ export const EditorLine = forwardRef<EditorLineHandle, EditorLineProps>(
         }
       },
       getOffset() {
-        const sel = window.getSelection()
-        if (!sel || sel.rangeCount === 0) return 0
-        return sel.getRangeAt(0).startOffset
+        const el = divRef.current
+        if (!el) return 0
+        return getCaretOffset(el)
       },
     }))
 
     useEffect(() => {
       const el = divRef.current
       if (!el) return
-      if (el.textContent !== line.text) {
-        const sel = window.getSelection()
-        const offset = sel?.rangeCount ? sel.getRangeAt(0).startOffset : 0
-        el.textContent = line.text
-        if (document.activeElement === el && el.firstChild) {
-          const range = document.createRange()
-          range.setStart(el.firstChild, Math.min(offset, (el.firstChild as Text).length))
-          range.collapse(true)
-          sel?.removeAllRanges()
-          sel?.addRange(range)
-        }
-      }
-    }, [line.text])
+
+      const desiredSegments = getLineSegments(line)
+      const currentSegments = readSegmentsFromElement(el)
+      if (segmentsEqual(currentSegments, desiredSegments)) return
+
+      const isFocused = document.activeElement === el
+      const offset = isFocused ? getCaretOffset(el) : 0
+      el.innerHTML = getLineHtml(line)
+      if (isFocused) setCaretOffset(el, offset)
+    }, [line])
 
     function handleInput() {
       const el = divRef.current
       if (!el) return
-      const text = el.textContent ?? ''
-      onChange(line.id, text)
+      const segments = readSegmentsFromElement(el)
+      onChange(line.id, { text: segments.map(segment => segment.text).join(''), segments })
+    }
+
+    function handleEditorKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+      if (!readOnly && (e.metaKey || e.ctrlKey) && !e.altKey) {
+        const key = e.key.toLowerCase()
+        const command = key === 'b' ? 'bold' : key === 'i' ? 'italic' : key === 'u' ? 'underline' : null
+        if (command) {
+          e.preventDefault()
+          document.execCommand(command)
+          handleInput()
+          return
+        }
+      }
+
+      onKeyDown(e, line.id)
     }
 
     return (
@@ -86,13 +92,13 @@ export const EditorLine = forwardRef<EditorLineHandle, EditorLineProps>(
         data-line-id={line.id}
         data-element-type={line.type}
         onInput={handleInput}
-        onKeyDown={e => onKeyDown(e, line.id)}
+        onKeyDown={handleEditorKeyDown}
         onClick={() => onClick(line.id)}
         style={{
           fontFamily: '"Courier Prime", monospace',
-          fontSize: '12pt',
-          lineHeight: '1.5',
-          minHeight: '1.5em',
+          fontSize: SCREENPLAY_FONT_SIZE,
+          lineHeight: SCREENPLAY_LINE_HEIGHT,
+          minHeight: '1em',
           outline: 'none',
           padding: '0 0.25rem',
           borderLeft: isActive ? '2px solid #e8b86d' : '2px solid transparent',
@@ -108,6 +114,7 @@ export const EditorLine = forwardRef<EditorLineHandle, EditorLineProps>(
           wordBreak: 'break-word',
           position: 'relative',
           cursor: readOnly ? 'default' : 'text',
+          boxSizing: 'border-box',
         }}
       />
     )
@@ -115,3 +122,103 @@ export const EditorLine = forwardRef<EditorLineHandle, EditorLineProps>(
 )
 
 EditorLine.displayName = 'EditorLine'
+
+function segmentsEqual(a: TextSegment[], b: TextSegment[]) {
+  if (a.length !== b.length) return false
+  for (let index = 0; index < a.length; index += 1) {
+    if (
+      a[index].text !== b[index].text
+      || !!a[index].bold !== !!b[index].bold
+      || !!a[index].italic !== !!b[index].italic
+      || !!a[index].underline !== !!b[index].underline
+    ) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function readSegmentsFromElement(element: HTMLElement): TextSegment[] {
+  const segments: TextSegment[] = []
+  collectSegments(element, {}, segments)
+  return normalizeSegments(segments, element.textContent ?? '')
+}
+
+function collectSegments(node: Node, marks: Omit<TextSegment, 'text'>, output: TextSegment[]) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent ?? ''
+    if (text) output.push({ text, ...marks })
+    return
+  }
+
+  if (!(node instanceof HTMLElement)) return
+
+  const nextMarks = {
+    ...marks,
+    ...(isBoldNode(node) ? { bold: true } : {}),
+    ...(isItalicNode(node) ? { italic: true } : {}),
+    ...(isUnderlineNode(node) ? { underline: true } : {}),
+  }
+
+  for (const child of Array.from(node.childNodes)) {
+    collectSegments(child, nextMarks, output)
+  }
+}
+
+function isBoldNode(node: HTMLElement) {
+  const tag = node.tagName
+  if (tag === 'B' || tag === 'STRONG') return true
+  const fontWeight = node.style.fontWeight
+  if (!fontWeight) return false
+  if (fontWeight === 'bold' || fontWeight === 'bolder') return true
+  const numericWeight = Number(fontWeight)
+  return !Number.isNaN(numericWeight) && numericWeight >= 600
+}
+
+function isItalicNode(node: HTMLElement) {
+  return node.tagName === 'I' || node.tagName === 'EM' || node.style.fontStyle === 'italic'
+}
+
+function isUnderlineNode(node: HTMLElement) {
+  return node.tagName === 'U' || node.style.textDecoration.includes('underline') || node.style.textDecorationLine.includes('underline')
+}
+
+function getCaretOffset(element: HTMLElement): number {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return 0
+
+  const range = selection.getRangeAt(0).cloneRange()
+  range.selectNodeContents(element)
+  range.setEnd(selection.anchorNode ?? element, selection.anchorOffset)
+  return range.toString().length
+}
+
+function setCaretOffset(element: HTMLElement, offset: number) {
+  const selection = window.getSelection()
+  if (!selection) return
+
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+  let remaining = Math.max(offset, 0)
+  let textNode = walker.nextNode() as Text | null
+
+  while (textNode) {
+    if (remaining <= textNode.length) {
+      const range = document.createRange()
+      range.setStart(textNode, remaining)
+      range.collapse(true)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      return
+    }
+
+    remaining -= textNode.length
+    textNode = walker.nextNode() as Text | null
+  }
+
+  const range = document.createRange()
+  range.selectNodeContents(element)
+  range.collapse(false)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}

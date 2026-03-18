@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth'
 import { redirect, notFound } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { parseScriptContent } from '@/lib/editor/content'
 import { ScriptEditorClient } from './ScriptEditorClient'
 
 export default async function ScriptPage({ params }: { params: Promise<{ id: string }> }) {
@@ -22,7 +23,7 @@ export default async function ScriptPage({ params }: { params: Promise<{ id: str
 
   const readOnly = collab?.role === 'viewer'
   const isAdmin = isOwner || collab?.role === 'admin'
-  const lines = JSON.parse(script.content || '[]')
+  const lines = parseScriptContent(script.content)
 
   return (
     <ScriptEditorClient

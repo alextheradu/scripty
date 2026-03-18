@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { serializeScriptContent } from '@/lib/editor/content'
 import { scriptSummary } from '@/lib/scriptHelpers'
 
 export async function GET() {
@@ -40,7 +41,7 @@ export async function POST() {
   const script = await prisma.script.create({
     data: {
       ownerId: session.user.id,
-      content: JSON.stringify([{ id: crypto.randomUUID(), type: 'ACTION', text: '' }]),
+      content: serializeScriptContent([{ id: crypto.randomUUID(), type: 'ACTION', text: '' }]),
     },
   })
 

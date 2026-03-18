@@ -8,10 +8,18 @@ export type ElementType =
   | 'SHOT'
   | 'GENERAL'
 
+export interface TextSegment {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+}
+
 export interface ScriptLine {
   id: string
   type: ElementType
   text: string
+  segments?: TextSegment[]
 }
 
 export interface SelectionRange {

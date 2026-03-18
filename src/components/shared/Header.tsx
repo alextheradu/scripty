@@ -9,6 +9,7 @@ interface OnlineUser {
   image?: string
   color: string
   socketId?: string
+  hasCursor?: boolean
 }
 
 interface HeaderProps {
@@ -17,6 +18,7 @@ interface HeaderProps {
   saveStatus: 'saved' | 'saving' | 'unsaved'
   streakCount?: number
   onlineUsers?: OnlineUser[]
+  onUserJump?: (userId: string) => void
   onTitleChange: (title: string) => void
   onExport: () => void
   onShare: () => void
@@ -24,7 +26,7 @@ interface HeaderProps {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function Header({ scriptId: _scriptId, title, saveStatus, streakCount, onlineUsers = [], onTitleChange, onExport, onShare, onPomodoro }: HeaderProps) {
+export function Header({ scriptId: _scriptId, title, saveStatus, streakCount, onlineUsers = [], onUserJump, onTitleChange, onExport, onShare, onPomodoro }: HeaderProps) {
   const [editing, setEditing] = useState(false)
   const [localTitle, setLocalTitle] = useState(title)
 
@@ -63,9 +65,20 @@ export function Header({ scriptId: _scriptId, title, saveStatus, streakCount, on
             {onlineUsers.length > 0 && (
               <div style={presenceWrapStyle} title={`${onlineUsers.length} collaborator${onlineUsers.length === 1 ? '' : 's'} online`}>
                 {onlineUsers.map((user, index) => (
-                  <div key={user.id} style={{ ...presenceAvatarStyle, marginLeft: index === 0 ? 0 : '-0.3rem' }}>
-                    <Avatar src={user.image} name={user.name ?? '?'} size={28} color={user.color} />
-                  </div>
+                  <button
+                    key={user.id}
+                    onClick={() => user.hasCursor && onUserJump?.(user.id)}
+                    title={user.hasCursor ? `Jump to ${user.name}` : `${user.name} is online`}
+                    style={{
+                      ...presenceAvatarButtonStyle,
+                      marginLeft: index === 0 ? 0 : '-0.3rem',
+                      cursor: user.hasCursor ? 'pointer' : 'default',
+                    }}
+                  >
+                    <div style={{ ...presenceAvatarStyle, outline: user.hasCursor ? `2px solid ${user.color}` : 'none' }}>
+                      <Avatar src={user.image} name={user.name ?? '?'} size={28} color={user.color} />
+                    </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -112,6 +125,14 @@ const presenceWrapStyle: React.CSSProperties = {
 
 const presenceAvatarStyle: React.CSSProperties = {
   display: 'inline-flex',
+  borderRadius: '50%',
+}
+
+const presenceAvatarButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  padding: 0,
+  border: 'none',
+  background: 'none',
 }
 
 const titleInputStyle: React.CSSProperties = {

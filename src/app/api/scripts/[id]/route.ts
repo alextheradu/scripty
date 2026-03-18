@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions, roleAtLeast } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { serializeScriptContent } from '@/lib/editor/content'
 import { getScriptAccess, updateWritingStats } from '@/lib/scriptHelpers'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -28,7 +29,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const updates: any = {}
   if (body.title !== undefined) updates.title = body.title
   if (body.content !== undefined) {
-    updates.content = typeof body.content === 'string' ? body.content : JSON.stringify(body.content)
+    updates.content = typeof body.content === 'string' ? body.content : serializeScriptContent(body.content)
     await updateWritingStats(session.user.id, updates.content, req.headers.get('x-timezone') ?? undefined)
   }
 

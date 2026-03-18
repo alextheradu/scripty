@@ -63,6 +63,12 @@ app.prepare().then(() => {
       socket.to(`script:${data.scriptId}`).emit('line:update', data)
     })
 
+    socket.on('script:content:update', (data) => {
+      const uid = socket.data.user?.id
+      if (!uid || String(uid).startsWith('anon-') || !socket.data.authenticated) return
+      socket.to(`script:${data.scriptId}`).emit('script:content:update', data)
+    })
+
     socket.on('cursor:move', (data) => {
       socket.to(`script:${data.scriptId}`).emit('cursor:move', {
         ...data,

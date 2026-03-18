@@ -1,15 +1,16 @@
 import type { ScriptLine } from '../editor/types'
+import { getLineHtml } from '../editor/content'
 import { LINE_STYLES } from '../editor/lineStyles'
 import { formatDisplayDate, type ExportMetadata } from './types'
-
-const CHARS_PER_LINE = 62
-const SCREENPLAY_LINES_PER_PAGE = 53
-
-const CHARS_PER_TYPE: Partial<Record<ScriptLine['type'], number>> = {
-  CHARACTER: 32,
-  PARENTHETICAL: 28,
-  DIALOGUE: 36,
-}
+import {
+  getEstimatedRenderedLines,
+  SCREENPLAY_FONT_SIZE,
+  SCREENPLAY_LINE_HEIGHT,
+  SCREENPLAY_LINES_PER_PAGE,
+  SCREENPLAY_PAGE_HEIGHT,
+  SCREENPLAY_PAGE_PADDING,
+  SCREENPLAY_PAGE_WIDTH,
+} from '../screenplayLayout'
 
 function escapeHtml(text: string): string {
   return text
@@ -38,7 +39,7 @@ function splitDialogueForMoreContd(lines: ScriptLine[]): ScriptLine[] {
 
       let totalLines = 0
       for (const blockLine of block) {
-        totalLines += Math.ceil(blockLine.text.length / CHARS_PER_LINE) + 1
+        totalLines += getEstimatedRenderedLines(blockLine) + 1
       }
 
       if (totalLines > 10) {
@@ -46,7 +47,7 @@ function splitDialogueForMoreContd(lines: ScriptLine[]): ScriptLine[] {
         let splitAt = -1
 
         for (let j = 0; j < block.length; j++) {
-          lineCount += Math.ceil(block[j].text.length / CHARS_PER_LINE) + 1
+          lineCount += getEstimatedRenderedLines(block[j]) + 1
           if (lineCount > totalLines / 2 && block[j].type === 'DIALOGUE' && splitAt === -1) {
             splitAt = j
           }
@@ -72,30 +73,6 @@ function splitDialogueForMoreContd(lines: ScriptLine[]): ScriptLine[] {
   return result
 }
 
-function buildParagraphs(lines: ScriptLine[]): string {
-  return splitDialogueForMoreContd(lines).map(line => {
-    const style = LINE_STYLES[line.type]
-    const styles = [
-      style.fontWeight ? `font-weight:${style.fontWeight}` : '',
-      style.textTransform ? `text-transform:${style.textTransform}` : '',
-      style.fontStyle ? `font-style:${style.fontStyle}` : '',
-      style.marginLeft ? `margin-left:${style.marginLeft}` : '',
-      style.marginRight ? `margin-right:${style.marginRight}` : '',
-      style.textAlign ? `text-align:${style.textAlign}` : '',
-    ].filter(Boolean).join(';')
-
-    return `<p class="line" style="${styles}">${escapeHtml(line.text) || '&nbsp;'}</p>`
-  }).join('\n')
-}
-
-function getEstimatedRenderedLines(line: ScriptLine): number {
-  const charsPerLine = CHARS_PER_TYPE[line.type] ?? CHARS_PER_LINE
-  const text = line.text.trim()
-  if (!text) return 1
-
-  return Math.max(1, Math.ceil(text.length / charsPerLine))
-}
-
 function buildPageParagraph(line: ScriptLine): string {
   const style = LINE_STYLES[line.type]
   const styles = [
@@ -107,7 +84,7 @@ function buildPageParagraph(line: ScriptLine): string {
     style.textAlign ? `text-align:${style.textAlign}` : '',
   ].filter(Boolean).join(';')
 
-  return `<p class="line" style="${styles}">${escapeHtml(line.text) || '&nbsp;'}</p>`
+  return `<p class="line" style="${styles}">${getLineHtml(line) || '&nbsp;'}</p>`
 }
 
 function paginateScreenplay(lines: ScriptLine[]): ScriptLine[][] {
@@ -151,9 +128,24 @@ ${pageLines.map(buildPageParagraph).join('\n')}
 }
 
 const baseStyles = `
-  html, body { margin: 0; padding: 0; }
-  body { font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 12pt; line-height: 1.5; }
-  .line { margin: 0; min-height: 1.5em; white-space: pre-wrap; overflow-wrap: break-word; }
+  @import url('https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
+  @page { size: letter; margin: 0; }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  body {
+    font-family: 'Courier Prime', 'Courier New', Courier, monospace;
+    font-size: ${SCREENPLAY_FONT_SIZE};
+    line-height: ${SCREENPLAY_LINE_HEIGHT};
+    color: #000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .line {
+    margin: 0;
+    min-height: 1em;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    page-break-inside: avoid;
+  }
 `
 
 export function buildPDFTitlePageHtml(metadata: ExportMetadata): string {
@@ -162,15 +154,16 @@ export function buildPDFTitlePageHtml(metadata: ExportMetadata): string {
 <head>
 <meta charset="UTF-8">
 <style>
-  @page { margin: 1in 1in 1in 1.5in; size: letter; }
   ${baseStyles}
   .title-page {
+    width: ${SCREENPLAY_PAGE_WIDTH};
+    min-height: ${SCREENPLAY_PAGE_HEIGHT};
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
-    height: 9in;
+    padding: ${SCREENPLAY_PAGE_PADDING};
     text-align: center;
   }
   .title-page h1 {
@@ -200,17 +193,13 @@ export function buildPDFScreenplayHtml(lines: ScriptLine[]): string {
 <head>
 <meta charset="UTF-8">
 <style>
-  @page {
-    margin: 1in 1in 1in 1.5in;
-    size: letter;
-  }
   ${baseStyles}
   .screenplay-page {
     position: relative;
+    width: ${SCREENPLAY_PAGE_WIDTH};
+    min-height: ${SCREENPLAY_PAGE_HEIGHT};
     box-sizing: border-box;
-    width: 8.5in;
-    height: 11in;
-    padding: 1in 1in 1in 1.5in;
+    padding: ${SCREENPLAY_PAGE_PADDING};
     break-after: page;
     page-break-after: always;
   }
@@ -220,8 +209,8 @@ export function buildPDFScreenplayHtml(lines: ScriptLine[]): string {
   }
   .page-number {
     position: absolute;
-    top: 0.45in;
-    left: 1.5in;
+    top: 0.5in;
+    right: 1in;
   }
 </style>
 </head>
@@ -237,18 +226,16 @@ export function buildPDFDocumentHtml(metadata: ExportMetadata, lines: ScriptLine
 <head>
 <meta charset="UTF-8">
 <style>
-  @page {
-    margin: 1in 1in 1in 1.5in;
-    size: letter;
-  }
   ${baseStyles}
   .title-page {
+    width: ${SCREENPLAY_PAGE_WIDTH};
+    min-height: ${SCREENPLAY_PAGE_HEIGHT};
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
-    height: 9in;
+    padding: ${SCREENPLAY_PAGE_PADDING};
     text-align: center;
     break-after: page;
     page-break-after: always;
@@ -263,10 +250,10 @@ export function buildPDFDocumentHtml(metadata: ExportMetadata, lines: ScriptLine
   .title-page .date { margin-top: 3em; }
   .screenplay-page {
     position: relative;
+    width: ${SCREENPLAY_PAGE_WIDTH};
+    min-height: ${SCREENPLAY_PAGE_HEIGHT};
     box-sizing: border-box;
-    width: 8.5in;
-    height: 11in;
-    padding: 1in 1in 1in 1.5in;
+    padding: ${SCREENPLAY_PAGE_PADDING};
     break-after: page;
     page-break-after: always;
   }
@@ -276,8 +263,8 @@ export function buildPDFDocumentHtml(metadata: ExportMetadata, lines: ScriptLine
   }
   .page-number {
     position: absolute;
-    top: 0.45in;
-    left: 1.5in;
+    top: 0.5in;
+    right: 1in;
   }
 </style>
 </head>

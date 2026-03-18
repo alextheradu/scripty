@@ -29,6 +29,7 @@ export function ExportModal({ scriptId, scriptTitle, defaultWrittenBy, open, onC
   const [writtenBy, setWrittenBy] = useState(defaultWrittenBy)
   const [date, setDate] = useState(getTodayValue())
   const [error, setError] = useState('')
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -36,11 +37,12 @@ export function ExportModal({ scriptId, scriptTitle, defaultWrittenBy, open, onC
     setWrittenBy(defaultWrittenBy)
     setDate(getTodayValue())
     setError('')
+    setExportingFormat(null)
   }, [defaultWrittenBy, open, scriptTitle])
 
   if (!open) return null
 
-  function download(format: string) {
+  async function download(format: string) {
     if (!title.trim() || !writtenBy.trim() || !date) {
       setError('Enter the title, writer name, and draft date before exporting.')
       return
@@ -53,8 +55,31 @@ export function ExportModal({ scriptId, scriptTitle, defaultWrittenBy, open, onC
       date,
     })
 
-    window.open(`/api/scripts/${scriptId}/export?${params.toString()}`, '_blank')
-    onClose()
+    setExportingFormat(format)
+    setError('')
+
+    try {
+      const response = await fetch(`/api/scripts/${scriptId}/export?${params.toString()}`)
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.error ?? 'Export failed.')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = getDownloadFilename(response.headers.get('content-disposition'), title.trim(), format)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Export failed.')
+    } finally {
+      setExportingFormat(null)
+    }
   }
 
   return (
@@ -109,16 +134,20 @@ export function ExportModal({ scriptId, scriptTitle, defaultWrittenBy, open, onC
           {FORMATS.map(f => (
             <button
               key={f.id}
-              onClick={() => download(f.id)}
+              onClick={() => void download(f.id)}
+              disabled={!!exportingFormat}
               style={{
                 background: '#0f0f11', border: '1px solid #2a2a30', borderRadius: 8,
                 padding: '0.75rem 1rem', textAlign: 'left', cursor: 'pointer',
                 transition: 'border-color 150ms',
+                opacity: exportingFormat && exportingFormat !== f.id ? 0.55 : 1,
               }}
               onMouseEnter={e => (e.currentTarget.style.borderColor = '#e8b86d')}
               onMouseLeave={e => (e.currentTarget.style.borderColor = '#2a2a30')}
             >
-              <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e8e6de', fontFamily: 'Syne, sans-serif', marginBottom: '0.2rem' }}>{f.label}</div>
+              <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#e8e6de', fontFamily: 'Syne, sans-serif', marginBottom: '0.2rem' }}>
+                {exportingFormat === f.id ? 'Preparing…' : f.label}
+              </div>
               <div style={{ fontSize: '0.6875rem', color: '#6b6a64', fontFamily: 'Syne, sans-serif' }}>{f.desc}</div>
             </button>
           ))}
@@ -155,4 +184,15 @@ const inputStyle: React.CSSProperties = {
   fontFamily: 'Syne, sans-serif',
   fontSize: '0.9375rem',
   outline: 'none',
+}
+
+function getDownloadFilename(contentDisposition: string | null, title: string, format: string) {
+  const utf8Match = contentDisposition?.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1])
+
+  const basicMatch = contentDisposition?.match(/filename="([^"]+)"/i)
+  if (basicMatch?.[1]) return basicMatch[1]
+
+  const extension = format === 'txt' ? 'txt' : format
+  return `${title.replace(/["\r\n]/g, '_')}.${extension}`
 }

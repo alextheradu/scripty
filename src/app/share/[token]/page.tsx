@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/db'
 import { Editor } from '@/components/editor/Editor'
+import { parseScriptContent } from '@/lib/editor/content'
 
 export default async function SharedScriptPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
@@ -9,7 +10,7 @@ export default async function SharedScriptPage({ params }: { params: Promise<{ t
   })
   if (!script || !script.publicAccess) notFound()
 
-  const lines = JSON.parse(script.content || '[]')
+  const lines = parseScriptContent(script.content)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f11' }}>

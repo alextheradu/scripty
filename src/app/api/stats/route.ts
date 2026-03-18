@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { addDays, diffDays, getDateKey } from '@/lib/dates'
+import { parseScriptContent } from '@/lib/editor/content'
+import { getEstimatedPageLayout } from '@/lib/screenplayLayout'
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions)
@@ -54,12 +56,9 @@ export async function GET(req: Request) {
   })
 
   const scriptStats = scripts.map(s => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let lines: any[] = []
-    try { lines = JSON.parse(s.content || '[]') } catch { lines = [] }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const words = lines.reduce((acc: number, l: any) => acc + (l.text?.split(/\s+/).filter(Boolean).length ?? 0), 0)
-    const pages = Math.max(1, Math.ceil(lines.length / 55))
+    const lines = parseScriptContent(s.content)
+    const words = lines.reduce((acc, line) => acc + line.text.split(/\s+/).filter(Boolean).length, 0)
+    const pages = getEstimatedPageLayout(lines).pageCount
     return { id: s.id, title: s.title, words, pages }
   })
 

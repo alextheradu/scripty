@@ -9,6 +9,7 @@ import { buildPDFDocumentHtml } from '@/lib/exporters/pdf'
 import { toPlainText } from '@/lib/exporters/plaintext'
 import type { ExportMetadata } from '@/lib/exporters/types'
 import { getScriptAccess } from '@/lib/scriptHelpers'
+import { parseScriptContent } from '@/lib/editor/content'
 
 export const runtime = 'nodejs'
 
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const script = await prisma.script.findUnique({ where: { id } })
   if (!script) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  const lines = JSON.parse(script.content || '[]')
+  const lines = parseScriptContent(script.content)
   const title = getRequiredParam(req, 'title') ?? script.title
   const writtenBy = getRequiredParam(req, 'writtenBy')
   const date = getRequiredParam(req, 'date')

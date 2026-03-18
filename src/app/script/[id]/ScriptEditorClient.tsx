@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Editor } from '@/components/editor/Editor'
 import { Header } from '@/components/shared/Header'
 import { LeftSidebar } from '@/components/sidebar/LeftSidebar'
@@ -11,6 +11,7 @@ import { ShareModal } from '@/components/shared/ShareModal'
 import { getSocket } from '@/lib/socket'
 import type { ScriptLine } from '@/lib/editor/types'
 import { ELEMENT_LABELS } from '@/lib/editor/lineStyles'
+import { getEstimatedPageLayout } from '@/lib/screenplayLayout'
 
 interface Props {
   scriptId: string; initialTitle: string; initialLines: ScriptLine[]
@@ -29,10 +30,17 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
   const [exportOpen, setExportOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string; image?: string; color: string; socketId?: string }[]>([])
+  const [cursorTargets, setCursorTargets] = useState<{ userId: string; name: string; image?: string; color: string; lineId: string; offset: number }[]>([])
+  const [jumpToUserId, setJumpToUserId] = useState<string | null>(null)
   const [activeType, setActiveType] = useState<ScriptLine['type']>('ACTION')
   const [streak, setStreak] = useState(0)
   const socket = getSocket()
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+  const onlineUsersWithCursors = useMemo(() => {
+    const cursorUserIds = new Set(cursorTargets.map(cursor => cursor.userId))
+    return onlineUsers.map(user => ({ ...user, hasCursor: cursorUserIds.has(user.id) }))
+  }, [cursorTargets, onlineUsers])
 
   useEffect(() => {
     const joinScript = () => {
@@ -66,7 +74,6 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
 
   function handleLinesChange(newLines: ScriptLine[]) {
     setLines(newLines)
-    setSaveStatus('saved')
     if (newLines.length > 0) setActiveType(newLines[newLines.length - 1].type)
   }
 
@@ -75,19 +82,29 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
       const next = [...prev]
       const [removed] = next.splice(from, 1)
       next.splice(to, 0, removed)
+      setSaveStatus('saving')
+      socket.emit('script:content:update', { scriptId, lines: next, authorId: userId, updatedAt: Date.now() })
+      fetch(`/api/scripts/${scriptId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-timezone': timeZone },
+        body: JSON.stringify({ content: next }),
+      })
+        .then(response => setSaveStatus(response.ok ? 'saved' : 'unsaved'))
+        .catch(() => setSaveStatus('unsaved'))
       return next
     })
   }
 
   const wordCount = lines.reduce((acc, l) => acc + (l.text.split(/\s+/).filter(Boolean).length), 0)
-  const pageCount = Math.max(1, Math.ceil(lines.length / 55))
+  const pageCount = getEstimatedPageLayout(lines).pageCount
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#0f0f11' }}>
       <Header
         scriptId={scriptId} title={title} saveStatus={saveStatus}
         streakCount={streak}
-        onlineUsers={onlineUsers}
+        onlineUsers={onlineUsersWithCursors}
+        onUserJump={setJumpToUserId}
         onTitleChange={handleTitleChange}
         onExport={() => setExportOpen(true)}
         onShare={() => setShareOpen(true)}
@@ -108,9 +125,13 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
 
         <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <Editor
-            scriptId={scriptId} initialLines={initialLines}
+            scriptId={scriptId} initialLines={lines}
             userId={userId} readOnly={readOnly}
             onLinesChange={handleLinesChange}
+            onSaveStatusChange={setSaveStatus}
+            onRemoteCursorsChange={setCursorTargets}
+            jumpToUserId={jumpToUserId}
+            onJumpHandled={() => setJumpToUserId(null)}
             onEdit={() => setSaveStatus('unsaved')}
           />
         </main>
@@ -118,7 +139,18 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
         <RightSidebar
           scriptId={scriptId} open={rightOpen}
           onlineUsers={onlineUsers} isAdmin={!!isAdmin}
-          onRestore={content => { setLines(content); setSaveStatus('unsaved') }}
+          onRestore={content => {
+            setLines(content)
+            setSaveStatus('saving')
+            socket.emit('script:content:update', { scriptId, lines: content, authorId: userId, updatedAt: Date.now() })
+            fetch(`/api/scripts/${scriptId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'x-timezone': timeZone },
+              body: JSON.stringify({ content }),
+            })
+              .then(response => setSaveStatus(response.ok ? 'saved' : 'unsaved'))
+              .catch(() => setSaveStatus('unsaved'))
+          }}
         />
 
         <button onClick={() => setRightOpen(o => !o)} style={toggleBtn('right')}>

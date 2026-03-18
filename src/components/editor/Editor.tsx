@@ -1,7 +1,8 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Avatar } from '@/components/shared/Avatar'
-import type { ScriptComment, ScriptLine, ElementType, SelectionRange } from '@/lib/editor/types'
+import { normalizeScriptLines, parseScriptContent, scriptLinesEqual } from '@/lib/editor/content'
+import type { ScriptComment, ScriptLine, ElementType, SelectionRange, TextSegment } from '@/lib/editor/types'
 import { ENTER_NEXT, DOUBLE_ENTER_NEXT, ELEMENT_CYCLE } from '@/lib/editor/types'
 import { EditorLine, EditorLineHandle } from './EditorLine'
 import { Toolbar } from './Toolbar'
@@ -9,9 +10,8 @@ import { Autocomplete } from './Autocomplete'
 import { PageBreak } from './PageBreak'
 import { getSocket } from '@/lib/socket'
 import { CollaboratorCursor } from './CollaboratorCursor'
+import { getEstimatedPageLayout, SCREENPLAY_PAGE_HEIGHT, SCREENPLAY_PAGE_PADDING, SCREENPLAY_PAGE_WIDTH } from '@/lib/screenplayLayout'
 
-const LINES_PER_PAGE = 55
-const PAPER_WIDTH = '8.5in'
 const GUTTER_WIDTH = 308
 const THREAD_WIDTH = 280
 const QUICK_REACTIONS = ['👍', '🎬', '👀'] as const
@@ -22,6 +22,10 @@ interface EditorProps {
   userId: string
   readOnly?: boolean
   onLinesChange?: (lines: ScriptLine[]) => void
+  onSaveStatusChange?: (status: 'saved' | 'saving' | 'unsaved') => void
+  onRemoteCursorsChange?: (cursors: { userId: string; name: string; image?: string; color: string; lineId: string; offset: number }[]) => void
+  jumpToUserId?: string | null
+  onJumpHandled?: () => void
   onEdit?: () => void
 }
 
@@ -29,7 +33,7 @@ interface LiveCursor {
   socketId: string
   lineId: string
   offset: number
-  user: { name: string; color: string }
+  user: { id: string; name: string; image?: string; color: string }
 }
 
 interface LiveSelection {
@@ -45,9 +49,9 @@ interface OverlayRect {
   height: number
 }
 
-export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange, onEdit }: EditorProps) {
+export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange, onSaveStatusChange, onRemoteCursorsChange, jumpToUserId, onJumpHandled, onEdit }: EditorProps) {
   const [lines, setLines] = useState<ScriptLine[]>(
-    initialLines.length ? initialLines : [{ id: crypto.randomUUID(), type: 'ACTION', text: '' }]
+    initialLines.length ? normalizeScriptLines(initialLines) : [{ id: crypto.randomUUID(), type: 'ACTION', text: '' }]
   )
   const [activeId, setActiveId] = useState<string>(lines[0]?.id ?? '')
   const [autocomplete, setAutocomplete] = useState<{
@@ -69,6 +73,8 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
   const lineRefs = useRef<Map<string, EditorLineHandle>>(new Map())
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
   const selectionFrame = useRef<number>()
+  const linesRef = useRef(lines)
+  const pendingSaveRef = useRef(false)
   const socket = getSocket()
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
@@ -76,21 +82,73 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
   const locations = lines.filter(l => l.type === 'SCENE_HEADING').map(l => l.text).filter(Boolean)
   const characters = lines.filter(l => l.type === 'CHARACTER').map(l => l.text.toUpperCase()).filter(Boolean)
   const lineOrder = useMemo(() => new Map(lines.map((line, index) => [line.id, index])), [lines])
+  const estimatedLayout = useMemo(() => getEstimatedPageLayout(lines), [lines])
+  const breakBeforeLineIds = useMemo(() => new Set(estimatedLayout.breakBeforeLineIds), [estimatedLayout.breakBeforeLineIds])
 
-  const scheduleSave = useCallback(() => {
+  const scheduleSave = useCallback((nextLines: ScriptLine[]) => {
     clearTimeout(saveTimer.current)
+    pendingSaveRef.current = true
+    onSaveStatusChange?.('saving')
     saveTimer.current = setTimeout(() => {
-      setLines(current => {
-        onLinesChange?.(current)
-        fetch(`/api/scripts/${scriptId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', 'x-timezone': timeZone },
-          body: JSON.stringify({ content: current }),
-        })
-        return current
+      fetch(`/api/scripts/${scriptId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-timezone': timeZone },
+        body: JSON.stringify({ content: nextLines }),
       })
-    }, 2000)
-  }, [scriptId, onLinesChange, timeZone])
+        .then(response => {
+          onSaveStatusChange?.(response.ok ? 'saved' : 'unsaved')
+        })
+        .catch(() => {
+          onSaveStatusChange?.('unsaved')
+        })
+        .finally(() => {
+        pendingSaveRef.current = false
+      })
+    }, 800)
+  }, [onSaveStatusChange, scriptId, timeZone])
+
+  const applyLinesUpdate = useCallback((
+    updater: ScriptLine[] | ((current: ScriptLine[]) => ScriptLine[]),
+    options?: {
+      broadcast?: boolean
+      persist?: boolean
+      markEdited?: boolean
+      syncAutocompleteId?: string
+      syncAutocompleteText?: string
+    }
+  ) => {
+    setLines(current => {
+      const next = normalizeScriptLines(typeof updater === 'function' ? updater(current) : updater)
+      if (scriptLinesEqual(current, next)) return current
+
+      linesRef.current = next
+      if (options?.markEdited) {
+        onEdit?.()
+        onSaveStatusChange?.('unsaved')
+      }
+      if (options?.syncAutocompleteId !== undefined && options.syncAutocompleteText !== undefined) {
+        updateAutocomplete(options.syncAutocompleteId, options.syncAutocompleteText, next)
+      }
+      if (options?.broadcast && !readOnly) {
+        socket.emit('script:content:update', { scriptId, lines: next, authorId: userId, updatedAt: Date.now() })
+      }
+      if (options?.persist) scheduleSave(next)
+      return next
+    })
+  }, [onEdit, onSaveStatusChange, readOnly, scheduleSave, scriptId, socket, userId])
+
+  useEffect(() => {
+    linesRef.current = lines
+    onLinesChange?.(lines)
+  }, [lines, onLinesChange])
+
+  useEffect(() => {
+    const normalized: ScriptLine[] = initialLines.length ? normalizeScriptLines(initialLines) : [{ id: crypto.randomUUID(), type: 'ACTION', text: '' }]
+    if (scriptLinesEqual(normalized, linesRef.current)) return
+    setLines(normalized)
+    linesRef.current = normalized
+    setActiveId(current => normalized.some(line => line.id === current) ? current : (normalized[0]?.id ?? ''))
+  }, [initialLines])
 
   useEffect(() => {
     fetch(`/api/scripts/${scriptId}/comments`)
@@ -135,21 +193,19 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
     }
   }
 
-  const updateLine = useCallback((id: string, text: string) => {
+  const updateLine = useCallback((id: string, content: { text: string; segments: TextSegment[] }) => {
     if (readOnly) return
-    onEdit?.()
-    setLines(prev => {
-      const next = prev.map(l => l.id === id ? { ...l, text } : l)
-      const line = next.find(l => l.id === id)
-      if (line) {
-        socket.emit('line:update', { scriptId, lineId: id, type: line.type, text, authorId: userId })
+    applyLinesUpdate(
+      prev => prev.map(line => line.id === id ? { ...line, text: content.text, segments: content.segments } : line),
+      {
+        broadcast: true,
+        persist: true,
+        markEdited: true,
+        syncAutocompleteId: id,
+        syncAutocompleteText: content.text,
       }
-      updateAutocomplete(id, text, next)
-      return next
-    })
-    scheduleSave()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scriptId, userId, scheduleSave, socket, onEdit, readOnly])
+    )
+  }, [applyLinesUpdate, readOnly])
 
   function handleKeyDown(e: React.KeyboardEvent, id: string) {
     const line = lines.find(l => l.id === id)
@@ -165,7 +221,11 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
 
       if (isDoubleEnter && DOUBLE_ENTER_NEXT[line.type]) {
         const newType = DOUBLE_ENTER_NEXT[line.type]!
-        setLines(prev => prev.map(l => l.id === id ? { ...l, type: newType } : l))
+        applyLinesUpdate(prev => prev.map(l => l.id === id ? { ...l, type: newType } : l), {
+          broadcast: true,
+          persist: true,
+          markEdited: true,
+        })
         setLastEnterEmpty(null)
         return
       }
@@ -182,10 +242,18 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
 
       if (atLineStart) {
         // Insert blank line above, keep focus on current line (which shifts down)
-        setLines(prev => [...prev.slice(0, idx), newLine, ...prev.slice(idx)])
+        applyLinesUpdate(prev => [...prev.slice(0, idx), newLine, ...prev.slice(idx)], {
+          broadcast: true,
+          persist: true,
+          markEdited: true,
+        })
         setTimeout(() => lineRefs.current.get(id)?.focus(0), 0)
       } else {
-        setLines(prev => [...prev.slice(0, idx + 1), newLine, ...prev.slice(idx + 1)])
+        applyLinesUpdate(prev => [...prev.slice(0, idx + 1), newLine, ...prev.slice(idx + 1)], {
+          broadcast: true,
+          persist: true,
+          markEdited: true,
+        })
         setActiveId(newId)
         setTimeout(() => lineRefs.current.get(newId)?.focus(), 0)
       }
@@ -197,14 +265,22 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
       const dir = e.shiftKey ? -1 : 1
       const currentIdx = ELEMENT_CYCLE.indexOf(line.type)
       const nextType = ELEMENT_CYCLE[(currentIdx + dir + ELEMENT_CYCLE.length) % ELEMENT_CYCLE.length]
-      setLines(prev => prev.map(l => l.id === id ? { ...l, type: nextType } : l))
+      applyLinesUpdate(prev => prev.map(l => l.id === id ? { ...l, type: nextType } : l), {
+        broadcast: true,
+        persist: true,
+        markEdited: true,
+      })
     }
 
     if (e.key === 'Backspace' && line.text === '' && lines.length > 1) {
       e.preventDefault()
       if (idx > 0) {
         const prevLine = lines[idx - 1]
-        setLines(prev => prev.filter(l => l.id !== id))
+        applyLinesUpdate(prev => prev.filter(l => l.id !== id), {
+          broadcast: true,
+          persist: true,
+          markEdited: true,
+        })
         setActiveId(prevLine.id)
         setTimeout(() => lineRefs.current.get(prevLine.id)?.focus(), 0)
       }
@@ -226,9 +302,13 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
   }
 
   useEffect(() => {
-    const handleLineUpdate = ({ lineId, type, text, authorId }: { lineId: string; type: ElementType; text: string; authorId: string }) => {
+    const handleContentUpdate = ({ lines: nextLines, authorId }: { lines: ScriptLine[]; authorId: string }) => {
       if (authorId === userId) return
-      setLines(prev => prev.map(l => l.id === lineId ? { ...l, type, text } : l))
+      const normalized = normalizeScriptLines(nextLines)
+      if (scriptLinesEqual(normalized, linesRef.current)) return
+      setLines(normalized)
+      linesRef.current = normalized
+      setActiveId(current => normalized.some(line => line.id === current) ? current : (normalized[0]?.id ?? ''))
     }
 
     const handleCursorMove = (data: LiveCursor) => {
@@ -260,7 +340,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
       setComments(prev => prev.map(existing => existing.id === comment.id ? comment : existing))
     }
 
-    socket.on('line:update', handleLineUpdate)
+    socket.on('script:content:update', handleContentUpdate)
     socket.on('cursor:move', handleCursorMove)
     socket.on('cursor:clear', handleCursorClear)
     socket.on('selection:update', handleSelectionUpdate)
@@ -268,7 +348,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
     socket.on('comment:update', handleCommentUpdate)
 
     return () => {
-      socket.off('line:update', handleLineUpdate)
+      socket.off('script:content:update', handleContentUpdate)
       socket.off('cursor:move', handleCursorMove)
       socket.off('cursor:clear', handleCursorClear)
       socket.off('selection:update', handleSelectionUpdate)
@@ -276,6 +356,55 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
       socket.off('comment:update', handleCommentUpdate)
     }
   }, [socket, userId])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function syncFromServer(force = false) {
+      if (pendingSaveRef.current && !force) return
+
+      try {
+        const response = await fetch(`/api/scripts/${scriptId}`)
+        const data = await response.json()
+        if (!response.ok || cancelled) return
+
+        const nextLines = parseScriptContent(data.script?.content)
+        if (scriptLinesEqual(nextLines, linesRef.current)) return
+        if (pendingSaveRef.current && !force) return
+
+        setLines(nextLines)
+        linesRef.current = nextLines
+        setActiveId(current => nextLines.some(line => line.id === current) ? current : (nextLines[0]?.id ?? ''))
+      } catch {
+        // Ignore transient sync failures.
+      }
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void syncFromServer()
+      }
+    }
+
+    const handleConnect = () => {
+      void syncFromServer()
+    }
+
+    const interval = window.setInterval(() => {
+      void syncFromServer()
+    }, 5000)
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    socket.on('connect', handleConnect)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      socket.off('connect', handleConnect)
+      clearTimeout(saveTimer.current)
+    }
+  }, [scriptId, socket])
 
   useEffect(() => {
     if (readOnly || typeof document === 'undefined') return
@@ -332,14 +461,24 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
     }
 
     document.addEventListener('selectionchange', publishSelection)
+    document.addEventListener('keyup', publishSelection)
+    document.addEventListener('mouseup', publishSelection)
+    document.addEventListener('focusin', publishSelection)
     return () => {
       cancelAnimationFrame(selectionFrame.current ?? 0)
       document.removeEventListener('selectionchange', publishSelection)
+      document.removeEventListener('keyup', publishSelection)
+      document.removeEventListener('mouseup', publishSelection)
+      document.removeEventListener('focusin', publishSelection)
     }
   }, [lineOrder, readOnly, scriptId, socket])
 
   const changeActiveType = (type: ElementType) => {
-    setLines(prev => prev.map(l => l.id === activeId ? { ...l, type } : l))
+    applyLinesUpdate(prev => prev.map(l => l.id === activeId ? { ...l, type } : l), {
+      broadcast: true,
+      persist: true,
+      markEdited: true,
+    })
   }
 
   const localSelectionRects = localSelection ? getRangeRects(localSelection, lines, lineOrder) : []
@@ -497,6 +636,38 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
     })
   }, [comments, lines, lineOrder])
 
+  useEffect(() => {
+    if (!onRemoteCursorsChange) return
+
+    const deduped = new Map<string, { userId: string; name: string; image?: string; color: string; lineId: string; offset: number }>()
+    for (const cursor of remoteCursors.values()) {
+      if (!cursor.user.id) continue
+      deduped.set(cursor.user.id, {
+        userId: cursor.user.id,
+        name: cursor.user.name,
+        image: cursor.user.image,
+        color: cursor.user.color,
+        lineId: cursor.lineId,
+        offset: cursor.offset,
+      })
+    }
+
+    onRemoteCursorsChange(Array.from(deduped.values()))
+  }, [onRemoteCursorsChange, remoteCursors])
+
+  useEffect(() => {
+    if (!jumpToUserId) return
+
+    const target = Array.from(remoteCursors.values()).find(cursor => cursor.user.id === jumpToUserId)
+    if (target) {
+      const lineEl = getLineElement(target.lineId)
+      lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setActiveId(target.lineId)
+    }
+
+    onJumpHandled?.()
+  }, [jumpToUserId, onJumpHandled, remoteCursors])
+
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
@@ -512,27 +683,27 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
 
         <div style={{
           flex: 1,
-          overflowY: 'auto',
+          overflow: 'auto',
           background: '#0f0f11',
           display: 'flex',
           justifyContent: 'center',
-          padding: '1.15rem 0',
+          padding: '1.15rem 1rem',
         }}>
           <div
             style={{
               position: 'relative',
-              width: `calc(${PAPER_WIDTH} + ${GUTTER_WIDTH}px)`,
-              minWidth: `calc(${PAPER_WIDTH} + ${GUTTER_WIDTH}px)`,
-              paddingRight: commentsOpen ? `${GUTTER_WIDTH}px` : '0',
+              width: commentsOpen ? `calc(${SCREENPLAY_PAGE_WIDTH} + ${GUTTER_WIDTH}px)` : SCREENPLAY_PAGE_WIDTH,
+              minWidth: commentsOpen ? `calc(${SCREENPLAY_PAGE_WIDTH} + ${GUTTER_WIDTH}px)` : SCREENPLAY_PAGE_WIDTH,
             }}
           >
             <div
               data-paper
               style={{
                 background: '#fffef7',
-                width: PAPER_WIDTH,
-                minHeight: '11in',
-                padding: '1in 1in 1in 1.5in',
+                width: SCREENPLAY_PAGE_WIDTH,
+                minHeight: SCREENPLAY_PAGE_HEIGHT,
+                padding: SCREENPLAY_PAGE_PADDING,
+                boxSizing: 'border-box',
                 boxShadow: '0 0 60px rgba(0,0,0,0.6)',
                 position: 'relative',
               }}
@@ -566,8 +737,8 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
               ))}
 
               {lines.map((line, i) => {
-                const showPageBreak = i > 0 && i % LINES_PER_PAGE === 0
-                const pageNum = Math.floor(i / LINES_PER_PAGE) + 1
+                const showPageBreak = breakBeforeLineIds.has(line.id)
+                const pageNum = estimatedLayout.pageNumberByLineId[line.id]
                 return (
                   <div key={line.id}>
                     {showPageBreak && <PageBreak pageNumber={pageNum} />}
@@ -591,7 +762,7 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
               <div style={{
                 position: 'absolute',
                 top: 0,
-                left: `calc(${PAPER_WIDTH} + 18px)`,
+                left: `calc(${SCREENPLAY_PAGE_WIDTH} + 18px)`,
                 width: THREAD_WIDTH,
                 minHeight: '100%',
               }}>
@@ -778,7 +949,13 @@ export function Editor({ scriptId, initialLines, userId, readOnly, onLinesChange
             query={autocomplete.query}
             position={autocomplete.position}
             onSelect={value => {
-              setLines(prev => prev.map(l => l.id === activeId ? { ...l, text: value } : l))
+              applyLinesUpdate(prev => prev.map(l => l.id === activeId ? { ...l, text: value, segments: [{ text: value }] } : l), {
+                broadcast: true,
+                persist: true,
+                markEdited: true,
+                syncAutocompleteId: activeId,
+                syncAutocompleteText: value,
+              })
               setAutocomplete(null)
             }}
             onDismiss={() => setAutocomplete(null)}
