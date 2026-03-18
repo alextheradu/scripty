@@ -35,13 +35,26 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
   useEffect(() => {
-    socket.emit('script:join', { scriptId, user: { id: userId, name: userName, image: userImage } })
+    const joinScript = () => {
+      socket.emit('script:join', { scriptId, user: { id: userId, name: userName, image: userImage } })
+    }
+
     const handlePresence = (users: { id: string; name: string; image?: string; color: string; socketId?: string }[]) =>
-      setOnlineUsers(users.filter(u => u.id !== userId))
+      setOnlineUsers(dedupeOnlineUsers(users.filter(u => u.id !== userId)))
+
+    joinScript()
+    socket.on('connect', joinScript)
     socket.on('presence:update', handlePresence)
+    const presenceInterval = window.setInterval(() => {
+      if (socket.connected) {
+        socket.emit('presence:ping', { scriptId })
+      }
+    }, 5000)
     fetch('/api/stats', { headers: { 'x-timezone': timeZone } }).then(r => r.json()).then(d => setStreak(d.currentStreak ?? 0)).catch(() => {})
     return () => {
+      window.clearInterval(presenceInterval)
       socket.emit('script:leave', { scriptId })
+      socket.off('connect', joinScript)
       socket.off('presence:update', handlePresence)
     }
   }, [scriptId, userId, userName, userImage, socket, timeZone])
@@ -74,6 +87,7 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
       <Header
         scriptId={scriptId} title={title} saveStatus={saveStatus}
         streakCount={streak}
+        onlineUsers={onlineUsers}
         onTitleChange={handleTitleChange}
         onExport={() => setExportOpen(true)}
         onShare={() => setShareOpen(true)}
@@ -141,6 +155,18 @@ export function ScriptEditorClient({ scriptId, initialTitle, initialLines, userI
       />
     </div>
   )
+}
+
+function dedupeOnlineUsers(users: { id: string; name: string; image?: string; color: string; socketId?: string }[]) {
+  const byUserId = new Map<string, { id: string; name: string; image?: string; color: string; socketId?: string }>()
+
+  for (const user of users) {
+    if (!byUserId.has(user.id)) {
+      byUserId.set(user.id, user)
+    }
+  }
+
+  return [...byUserId.values()]
 }
 
 function toggleBtn(side: 'left' | 'right'): React.CSSProperties {

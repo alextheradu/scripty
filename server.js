@@ -50,6 +50,12 @@ app.prepare().then(() => {
       io.to(`script:${scriptId}`).emit('presence:update', getRoomPresence(io, scriptId))
     })
 
+    socket.on('presence:ping', ({ scriptId }) => {
+      const activeScriptId = scriptId || socket.data.scriptId
+      if (!activeScriptId) return
+      io.to(`script:${activeScriptId}`).emit('presence:update', getRoomPresence(io, activeScriptId))
+    })
+
     socket.on('line:update', (data) => {
       // Block anonymous/unauthenticated sockets from broadcasting edits
       const uid = socket.data.user?.id

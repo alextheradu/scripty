@@ -1,12 +1,22 @@
 'use client'
 import { useState } from 'react'
 import { AppNav } from './AppNav'
+import { Avatar } from './Avatar'
+
+interface OnlineUser {
+  id: string
+  name: string
+  image?: string
+  color: string
+  socketId?: string
+}
 
 interface HeaderProps {
   scriptId: string
   title: string
   saveStatus: 'saved' | 'saving' | 'unsaved'
   streakCount?: number
+  onlineUsers?: OnlineUser[]
   onTitleChange: (title: string) => void
   onExport: () => void
   onShare: () => void
@@ -14,7 +24,7 @@ interface HeaderProps {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function Header({ scriptId: _scriptId, title, saveStatus, streakCount, onTitleChange, onExport, onShare, onPomodoro }: HeaderProps) {
+export function Header({ scriptId: _scriptId, title, saveStatus, streakCount, onlineUsers = [], onTitleChange, onExport, onShare, onPomodoro }: HeaderProps) {
   const [editing, setEditing] = useState(false)
   const [localTitle, setLocalTitle] = useState(title)
 
@@ -50,6 +60,15 @@ export function Header({ scriptId: _scriptId, title, saveStatus, streakCount, on
             )}
             <span style={{ ...statusPillStyle, color: statusColor }}>{statusText}</span>
             {!!streakCount && <span style={streakPillStyle}>🔥 {streakCount} day streak</span>}
+            {onlineUsers.length > 0 && (
+              <div style={presenceWrapStyle} title={`${onlineUsers.length} collaborator${onlineUsers.length === 1 ? '' : 's'} online`}>
+                {onlineUsers.map((user, index) => (
+                  <div key={user.id} style={{ ...presenceAvatarStyle, marginLeft: index === 0 ? 0 : '-0.3rem' }}>
+                    <Avatar src={user.image} name={user.name ?? '?'} size={28} color={user.color} />
+                  </div>
+                ))}
+              </div>
+            )}
             <button onClick={onExport} style={btnStyle}>Export</button>
             <button onClick={onShare} style={btnStyle}>Share</button>
             <button onClick={onPomodoro} style={btnStyle}>Focus</button>
@@ -80,6 +99,19 @@ const statusPillStyle: React.CSSProperties = {
 const streakPillStyle: React.CSSProperties = {
   ...statusPillStyle,
   color: '#e8b86d',
+}
+
+const presenceWrapStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '0.18rem 0.3rem',
+  borderRadius: 999,
+  border: '1px solid #2a2a30',
+  background: '#17171c',
+}
+
+const presenceAvatarStyle: React.CSSProperties = {
+  display: 'inline-flex',
 }
 
 const titleInputStyle: React.CSSProperties = {
