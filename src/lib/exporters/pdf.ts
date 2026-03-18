@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import type { ScriptLine } from '../editor/types'
 import { getLineHtml } from '../editor/content'
 import { LINE_STYLES } from '../editor/lineStyles'
@@ -127,8 +129,10 @@ ${pageLines.map(buildPageParagraph).join('\n')}
   }).join('\n')
 }
 
+const embeddedFontFaces = buildEmbeddedFontFaces()
+
 const baseStyles = `
-  @import url('https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap');
+  ${embeddedFontFaces}
   @page { size: letter; margin: 0; }
   html, body { margin: 0; padding: 0; background: #fff; }
   body {
@@ -147,6 +151,39 @@ const baseStyles = `
     page-break-inside: avoid;
   }
 `
+
+function buildEmbeddedFontFaces() {
+  const regular = readFontDataUri('CourierPrime-Regular.ttf')
+  const bold = readFontDataUri('CourierPrime-Bold.ttf')
+  const italic = readFontDataUri('CourierPrime-Italic.ttf')
+
+  return `
+    @font-face {
+      font-family: 'Courier Prime';
+      src: url('${regular}') format('truetype');
+      font-style: normal;
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: 'Courier Prime';
+      src: url('${bold}') format('truetype');
+      font-style: normal;
+      font-weight: 700;
+    }
+    @font-face {
+      font-family: 'Courier Prime';
+      src: url('${italic}') format('truetype');
+      font-style: italic;
+      font-weight: 400;
+    }
+  `
+}
+
+function readFontDataUri(fileName: string) {
+  const filePath = path.join(process.cwd(), 'public', 'fonts', 'courier-prime', fileName)
+  const fontBuffer = readFileSync(filePath)
+  return `data:font/ttf;base64,${fontBuffer.toString('base64')}`
+}
 
 export function buildPDFTitlePageHtml(metadata: ExportMetadata): string {
   return `<!DOCTYPE html>
